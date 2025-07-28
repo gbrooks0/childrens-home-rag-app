@@ -6,4 +6,6 @@ langchain-experimental
 beautifulsoup4
 pypdfium2
 requests
-chromadb
+# --- THIS IS THE FINAL FIX ---
+# Pinning chromadb to a known stable version that is compatible with Streamlit Cloud's environment.
+chromadb==0.4.24
