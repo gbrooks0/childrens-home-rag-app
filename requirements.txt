@@ -10,3 +10,5 @@ numpy
 unstructured[docx]
 pysqlite3-binary
 langchain-chroma
+langchain-openai
+openai
