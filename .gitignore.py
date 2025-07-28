@@ -2,7 +2,8 @@
 venv/
 
 # Vector Database
-db/
+
+# db/
 
 # Python Caches
 __pycache__/
