@@ -7,5 +7,7 @@ beautifulsoup4
 pypdfium2
 requests
 # --- THIS IS THE FINAL FIX ---
-# Pinning chromadb to a known stable version that is compatible with Streamlit Cloud's environment.
+# Pinning chromadb to a known stable version.
 chromadb==0.4.24
+# Pinning numpy to a version BEFORE the breaking 2.0 update.
+numpy<2.0
