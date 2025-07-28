@@ -1,4 +1,4 @@
-# app.py (Definitive Final Version with All Syntax Errors Corrected and Logic Improved)
+# app.py (Definitive Final Version with All Syntax Errors Corrected and Enhanced Error Logging)
 
 import streamlit as st
 from rag_system import RAGSystem
@@ -8,21 +8,40 @@ import os
 @st.cache_resource
 def load_rag_system():
     """Loads the RAG system and stores it in cache."""
-    print("--- FIRST TIME INITIALIZATION ---")
-    return RAGSystem()
+    print("--- FIRST TIME INITIALIZATION OF RAG SYSTEM (cached) ---")
+    try:
+        # Attempt to load RAGSystem
+        rag_system_instance = RAGSystem()
+        print("--- RAG SYSTEM INITIALIZED SUCCESSFULLY (cached) ---")
+        return rag_system_instance
+    except Exception as e:
+        # Catch any error during RAGSystem initialization and display it
+        st.error(f"Error during RAGSystem initialization: {e}")
+        print(f"ERROR: RAGSystem initialization failed: {e}")
+        # Re-raise the exception to ensure it propagates and is visible in logs
+        raise e
 
 # --- Core App Setup ---
 st.set_page_config(page_title="AI Strategy Assistant", layout="wide")
 st.title("🤖 AI Strategy Assistant")
 
 try:
+    # This block handles the async event loop for local testing if not already running
     loop = asyncio.get_running_loop()
 except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-with st.spinner("Initializing knowledge base..."):
-    rag_system = load_rag_system()
+# Wrap the loading of the RAG system in a try-except to catch early errors
+try:
+    with st.spinner("Initializing knowledge base..."):
+        rag_system = load_rag_system()
+    st.success("Knowledge base initialized!") # Success message if loaded
+except Exception as e:
+    st.error(f"Failed to initialize the AI Strategy Assistant. Please check the logs for details. Error: {e}")
+    # Prevent further app execution if RAGSystem fails to load
+    st.stop()
+
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -44,19 +63,23 @@ with st.sidebar:
     uploaded_doc = st.file_uploader("Upload a PDF for this session", type=["pdf"])
     
     st.header("🖼️ Image Analysis")
-    uploaded_image = st.file_uploader("Upload an image to analyze", type=["png", "jpg", "jpeg"])
+    uploaded_image = st.file_uploader("Upload an image for analysis", type=["png", "jpg", "jpeg"])
 
 # --- File Processing Logic ---
 if uploaded_doc:
+    # Only process if a new document is uploaded or if it's a different file
     if st.session_state.uploaded_filename != uploaded_doc.name:
-        with st.spinner(f"Processing '{uploaded_doc.name}'..."):
+        with st.spinner(f"Processing '{uploaded_doc.name}' for this session..."):
             file_bytes = uploaded_doc.getvalue()
             rag_system.process_uploaded_file(file_bytes)
             st.session_state.uploaded_filename = uploaded_doc.name
-            
+        st.success(f"'{uploaded_doc.name}' loaded for this session!")
+        st.rerun() # Rerun to update the app state with the new file
+
 if uploaded_image:
     with st.sidebar:
         st.image(uploaded_image, caption="Image for Analysis", use_column_width=True)
+
 
 # --- Main Chat Interface ---
 for message in st.session_state.messages:
@@ -64,11 +87,11 @@ for message in st.session_state.messages:
         if isinstance(message["content"], dict):
             st.markdown(message["content"]["answer"])
             with st.expander("Show Sources Consulted"):
-                 st.write(message["content"]["sources_text"])
+                st.write(message["content"]["sources_text"])
         else:
             st.markdown(message["content"])
 
-if prompt := st.chat_input("Ask your question here..."):
+if prompt := st.chat_input("Ask a question about children's home standards..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -79,11 +102,9 @@ if prompt := st.chat_input("Ask your question here..."):
             retriever = rag_system.get_current_retriever()
             
             # Retrieve source documents based on the prompt
-            # THIS IS WHERE 'source_docs' IS DEFINED, PREVIOUSLY 'docs'
             source_docs = retriever.invoke(prompt)
             
             # Join the page content of the retrieved documents to form the context text
-            # 'source_docs' is used here instead of the undefined 'docs'
             context_text = "\n\n".join([doc.page_content for doc in source_docs])
             
             # Prepare image bytes if an image was uploaded

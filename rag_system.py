@@ -1,4 +1,4 @@
-# rag_system.py (Definitive, Complete, and Final Version - Enhanced for Expert Feedback and Analysis & SQLite fix)
+# rag_system.py (Definitive, Complete, and Final Version - Enhanced for Expert Feedback and Analysis & SQLite fix & Diagnostic Prints)
 
 import os
 import tempfile
@@ -6,8 +6,13 @@ import base64
 import sys # Import sys
 
 # --- IMPORTANT: SQLite3 Fix for ChromaDB in Deployment Environments ---
-__import__('pysqlite3')
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# This ensures that chromadb uses a compatible SQLite version if the system's is outdated.
+try:
+    __import__('pysqlite3')
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+    print("DEBUG: pysqlite3 imported and set as default sqlite3 module.")
+except ImportError:
+    print("DEBUG: pysqlite3 not found, falling back to system sqlite3.")
 # --- END SQLite3 Fix ---
 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
@@ -53,75 +58,104 @@ You are a highly experienced and professional consultant specializing in the ope
 
     def __init__(self):
         """Initializes the RAG system using a FAISS index with similarity search."""
-        print("Initializing RAG System with FAISS...")
-        # Temperature is set to 0.7 as a good balance of creative and factual
-        self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0.7)
-        self.embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
-        
+        print("DEBUG: Initializing RAG System...")
+
+        # Check for API Key explicitly
+        api_key_status = "Not Set"
+        if "GOOGLE_API_KEY" in os.environ and os.environ["GOOGLE_API_KEY"]:
+            api_key_status = "Found and Non-Empty"
+        print(f"DEBUG: GOOGLE_API_KEY status: {api_key_status}")
+
+        print("DEBUG: Attempting to initialize LLM (Gemini 1.5 Pro) and Embeddings (text-embedding-004)...")
+        try:
+            self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0.7)
+            self.embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+            print("DEBUG: LLM and Embeddings initialized successfully.")
+        except Exception as e:
+            print(f"ERROR: Failed to initialize LLM or Embeddings. This often means GOOGLE_API_KEY is missing or invalid. Details: {e}")
+            raise
+
         db_path = "faiss_index"
-        
+        print(f"DEBUG: Checking for FAISS index at: '{db_path}'...")
+
         if not os.path.exists(db_path):
+            print(f"ERROR: FAISS index directory NOT FOUND at '{db_path}'. This is a critical error.")
             raise FileNotFoundError(
                 f"FAISS index not found at '{db_path}'. "
-                "Please run the final ingest.py script to create it."
+                "Please ensure you have run ingest.py locally to create it, and then committed and pushed the 'faiss_index' directory to your GitHub repository."
             )
-        
-        db = FAISS.load_local(
-            db_path, self.embeddings, allow_dangerous_deserialization=True
-        )
-        
+
+        print(f"DEBUG: FAISS index directory found. Attempting to load from '{db_path}'...")
+        try:
+            db = FAISS.load_local(
+                db_path, self.embeddings, allow_dangerous_deserialization=True
+            )
+            print("DEBUG: FAISS index loaded successfully.")
+        except Exception as e:
+            print(f"ERROR: Failed to load FAISS index from '{db_path}'. Details: {e}")
+            raise
+
         # A simple, powerful similarity search retrieving a good number of chunks
         self.main_retriever = db.as_retriever(
             search_type="similarity",
             search_kwargs={'k': 12} 
         )
-        
+        print("DEBUG: Main retriever initialized.")
+
         self.session_retriever = None
-        print("RAG System Ready.")
+        print("DEBUG: RAG System initialization complete.")
 
     def process_uploaded_file(self, uploaded_file_bytes: bytes):
         """Processes a user-uploaded file in-memory and sets the session retriever."""
+        print("DEBUG: Processing uploaded file...")
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                 tmp_file.write(uploaded_file_bytes)
                 tmp_file_path = tmp_file.name
+            print(f"DEBUG: Temporary file created at {tmp_file_path}")
             loader = PyPDFium2Loader(tmp_file_path)
             docs = loader.load()
+            print(f"DEBUG: Loaded {len(docs)} documents from temporary file.")
         finally:
-            os.remove(tmp_file_path)
+            if 'tmp_file_path' in locals() and os.path.exists(tmp_file_path):
+                os.remove(tmp_file_path)
+                print(f"DEBUG: Temporary file {tmp_file_path} removed.")
 
         chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(docs)
+        print(f"DEBUG: Split uploaded document into {len(chunks)} chunks.")
         temp_db = Chroma.from_documents(chunks, self.embeddings)
         self.session_retriever = temp_db.as_retriever(search_kwargs={"k": 3})
-        print("Temporary session retriever created.")
+        print("DEBUG: Temporary session retriever created.")
 
     def get_current_retriever(self):
         """Returns the correct retriever (ensemble or main) for the current session."""
         if self.session_retriever:
-            print("Using Ensemble Retriever (FAISS + session file)")
+            print("DEBUG: Using Ensemble Retriever (FAISS + session file)")
             return EnsembleRetriever(
                 retrievers=[self.main_retriever, self.session_retriever],
                 weights=[0.7, 0.3]
             )
         else:
-            print("Using Main FAISS Retriever")
+            print("DEBUG: Using Main FAISS Retriever")
             return self.main_retriever
 
     def clear_session(self):
         """Clears the session-specific retriever for uploaded files."""
         self.session_retriever = None
-        print("Session retriever cleared.")
+        print("DEBUG: Session retriever cleared.")
 
     def query(self, user_question: str, context_text: str, source_docs: list, image_bytes=None):
         """
         Queries the LLM with the provided context and passes through the source documents.
         """
+        print("DEBUG: Starting query process...")
         full_prompt_text = self.ADVANCED_PROMPT_TEMPLATE.format(
             context=context_text, 
             question=user_question
         )
-        
+
         if image_bytes:
+            print("DEBUG: Image bytes provided, preparing for multimodal query.")
             image_base64 = base64.b64encode(image_bytes).decode('utf-8')
             message = HumanMessage(
                 content=[
@@ -131,6 +165,8 @@ You are a highly experienced and professional consultant specializing in the ope
             )
             response = self.llm.invoke([message])
         else:
+            print("DEBUG: No image bytes provided, performing text-only query.")
             response = self.llm.invoke(full_prompt_text)
-            
+
+        print("DEBUG: LLM response received.")
         return {"answer": response.content, "source_documents": source_docs}
