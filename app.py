@@ -1,9 +1,26 @@
-# app.py (Definitive Final Version with Smart Routing LLM Support)
+# app.py (Definitive Final Version with Smart Routing LLM Support and API Key Fix)
 
 import streamlit as st
 from rag_system import RAGSystem
 import asyncio
 import os
+
+# --- Explicitly set API keys from Streamlit secrets into os.environ ---
+# This ensures they are available before any LLM clients try to access them.
+# The `os.environ.get` will read from Streamlit's internal secrets mechanism.
+google_api_key_from_secrets = st.secrets.get("GOOGLE_API_KEY")
+if google_api_key_from_secrets:
+    os.environ["GOOGLE_API_KEY"] = google_api_key_from_secrets
+    print("DEBUG: GOOGLE_API_KEY set in os.environ from st.secrets.")
+else:
+    print("WARNING: GOOGLE_API_KEY not found in st.secrets.")
+
+openai_api_key_from_secrets = st.secrets.get("OPENAI_API_KEY")
+if openai_api_key_from_secrets:
+    os.environ["OPENAI_API_KEY"] = openai_api_key_from_secrets
+    print("DEBUG: OPENAI_API_KEY set in os.environ from st.secrets.")
+else:
+    print("WARNING: OPENAI_API_KEY not found in st.secrets.")
 
 @st.cache_resource
 def load_rag_system():

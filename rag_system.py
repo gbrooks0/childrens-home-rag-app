@@ -1,4 +1,4 @@
-# rag_system.py (Definitive, Complete, and Final Version - Smart Routing Implementation)
+# rag_system.py (Definitive, Complete, and Final Version - Fix API Key Passing & Timeout)
 
 import os
 import tempfile
@@ -83,35 +83,55 @@ You are a highly experienced and professional consultant specializing in the ope
         self.gemini_llm = None
         self.gemini_embeddings = None
         print("DEBUG: Attempting to initialize Gemini LLM (Gemini 1.5 Pro) and Embeddings (text-embedding-004)...")
-        try:
-            gemini_api_key_status = "Not Set"
-            if "GOOGLE_API_KEY" in os.environ and os.environ["GOOGLE_API_KEY"]:
-                gemini_api_key_status = "Found and Non-Empty"
-            print(f"DEBUG: GOOGLE_API_KEY status: {gemini_api_key_status}")
+        
+        # Get API key from environment
+        gemini_api_key = os.environ.get("GOOGLE_API_KEY")
+        gemini_api_key_status = "Not Set"
+        if gemini_api_key:
+            gemini_api_key_status = "Found and Non-Empty"
+        print(f"DEBUG: GOOGLE_API_KEY status: {gemini_api_key_status}")
 
-            self.gemini_llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0.1) # Lower temp for classification
-            self.gemini_embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
-            print("DEBUG: Gemini LLM and Embeddings initialized successfully.")
-        except Exception as e:
-            print(f"ERROR: Failed to initialize Gemini LLM or Embeddings. This often means GOOGLE_API_KEY is missing or invalid. Details: {e}")
+        if not gemini_api_key:
+            print("ERROR: GOOGLE_API_KEY not found. Gemini LLM and Embeddings will not be initialized.")
+            self.gemini_llm = None
+            self.gemini_embeddings = None
+        else:
+            try:
+                # Explicitly pass the API key
+                self.gemini_llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0.1, google_api_key=gemini_api_key)
+                self.gemini_embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=gemini_api_key)
+                print("DEBUG: Gemini LLM and Embeddings initialized successfully.")
+            except Exception as e:
+                self.gemini_llm = None # Set to None if initialization fails
+                self.gemini_embeddings = None
+                print(f"ERROR: Failed to initialize Gemini LLM or Embeddings despite key presence. Details: {e}")
 
         # --- Initialize OpenAI LLM and Embeddings ---
         self.openai_llm = None
         self.openai_embeddings = None
         print("DEBUG: Attempting to initialize OpenAI LLM (GPT-4o) and Embeddings (text-embedding-ada-002)...")
-        try:
-            openai_api_key_status = "Not Set"
-            if "OPENAI_API_KEY" in os.environ and os.environ["OPENAI_API_KEY"]:
-                openai_api_key_status = "Found and Non-Empty"
-            print(f"DEBUG: OPENAI_API_KEY status: {openai_api_key_status}")
+        
+        # Get API key from environment
+        openai_api_key = os.environ.get("OPENAI_API_KEY")
+        openai_api_key_status = "Not Set"
+        if openai_api_key:
+            openai_api_key_status = "Found and Non-Empty"
+        print(f"DEBUG: OPENAI_API_KEY status: {openai_api_key_status}")
 
-            self.openai_llm = ChatOpenAI(model="gpt-4o", temperature=0.7) # Higher temp for strategic answers
-            self.openai_embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
-            print("DEBUG: OpenAI LLM and Embeddings initialized successfully.")
-        except Exception as e:
-            self.openai_llm = None # Set to None if initialization fails
+        if not openai_api_key:
+            print("ERROR: OPENAI_API_KEY not found. OpenAI LLM and Embeddings will not be initialized.")
+            self.openai_llm = None
             self.openai_embeddings = None
-            print(f"ERROR: Failed to initialize OpenAI LLM or Embeddings. This often means OPENAI_API_KEY is missing or invalid. Details: {e}")
+        else:
+            try:
+                # Explicitly pass the API key
+                self.openai_llm = ChatOpenAI(model="gpt-4o", temperature=0.7, openai_api_key=openai_api_key)
+                self.openai_embeddings = OpenAIEmbeddings(model="text-embedding-ada-002", openai_api_key=openai_api_key)
+                print("DEBUG: OpenAI LLM and Embeddings initialized successfully.")
+            except Exception as e:
+                self.openai_llm = None # Set to None if initialization fails
+                self.openai_embeddings = None
+                print(f"ERROR: Failed to initialize OpenAI LLM or Embeddings despite key presence. Details: {e}")
 
         # Determine which embeddings to use for FAISS loading
         # IMPORTANT: The embeddings model used here MUST match the one used during ingestion.
@@ -154,46 +174,29 @@ You are a highly experienced and professional consultant specializing in the ope
         self.session_retriever = None
         print("DEBUG: RAG System initialization complete.")
 
-    def process_uploaded_file(self, uploaded_file_bytes: bytes):
-        """Processes a user-uploaded file in-memory and sets the session retriever."""
-        print("DEBUG: Processing uploaded file...")
+    def _classify_question(self, question: str) -> str:
+        """
+        Classifies the user's question as 'Regulatory_Factual' or 'Strategic_Analytical'.
+        Uses Gemini for classification.
+        """
+        if not self.gemini_llm:
+            print("WARNING: Gemini LLM not available for classification. Defaulting to 'Strategic_Analytical'.")
+            return "Strategic_Analytical" # Default if Gemini isn't available
+
+        classification_prompt = self.CLASSIFICATION_PROMPT.format(question=question)
+        print(f"DEBUG: Classifying question: '{question}'")
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                tmp_file.write(uploaded_file_bytes)
-                tmp_file_path = tmp_file.name
-            print(f"DEBUG: Temporary file created at {tmp_file_path}")
-            loader = PyPDFium2Loader(tmp_file_path)
-            docs = loader.load()
-            print(f"DEBUG: Loaded {len(docs)} documents from temporary file.")
-        finally:
-            if 'tmp_file_path' in locals() and os.path.exists(tmp_file_path):
-                os.remove(tmp_file_path)
-                print(f"DEBUG: Temporary file {tmp_file_path} removed.")
-
-        # Note: Embeddings used for session documents must be consistent with the main index
-        # We use the self.embeddings which was determined during __init__ based on availability
-        chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(docs)
-        print(f"DEBUG: Split uploaded document into {len(chunks)} chunks.")
-        temp_db = Chroma.from_documents(chunks, self.embeddings) # Using self.embeddings
-        self.session_retriever = temp_db.as_retriever(search_kwargs={"k": 3})
-        print("DEBUG: Temporary session retriever created.")
-
-    def get_current_retriever(self):
-        """Returns the correct retriever (ensemble or main) for the current session."""
-        if self.session_retriever:
-            print("DEBUG: Using Ensemble Retriever (FAISS + session file)")
-            return EnsembleRetriever(
-                retrievers=[self.main_retriever, self.session_retriever],
-                weights=[0.7, 0.3]
-            )
-        else:
-            print("DEBUG: Using Main FAISS Retriever")
-            return self.main_retriever
-
-    def clear_session(self):
-        """Clears the session-specific retriever for uploaded files."""
-        self.session_retriever = None
-        print("DEBUG: Session retriever cleared.")
+            classification_response = self.gemini_llm.invoke(classification_prompt)
+            category = classification_response.content.strip()
+            print(f"DEBUG: Question classified as: '{category}'")
+            if category in ["Regulatory_Factual", "Strategic_Analytical"]:
+                return category
+            else:
+                print(f"WARNING: Unexpected classification: '{category}'. Defaulting to 'Strategic_Analytical'.")
+                return "Strategic_Analytical" # Fallback for unexpected classification
+        except Exception as e:
+            print(f"ERROR: Failed to classify question with Gemini: {e}. Defaulting to 'Strategic_Analytical'.")
+            return "Strategic_Analytical" # Fallback if classification fails
 
     def query(self, user_question: str, context_text: str, source_docs: list, image_bytes=None):
         """
@@ -235,7 +238,7 @@ You are a highly experienced and professional consultant specializing in the ope
             primary_llm = self.gemini_llm
             primary_llm_name = "Gemini"
             fallback_llm = self.openai_llm
-            fallback_llm_name = "ChatGPT"
+            fallback_llm_name = "Gemini" # Fallback to Gemini if primary is unknown or fails
 
         # --- Try Primary LLM ---
         if primary_llm:
