@@ -8,4 +8,5 @@ requests
 faiss-cpu
 numpy
 unstructured[docx]
+pysqlite3-binary
 langchain-chroma

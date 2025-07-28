@@ -1,8 +1,15 @@
-# rag_system.py (Definitive, Complete, and Final Version - Enhanced for Expert Feedback and Analysis)
+# rag_system.py (Definitive, Complete, and Final Version - Enhanced for Expert Feedback and Analysis & SQLite fix)
 
 import os
 import tempfile
 import base64
+import sys # Import sys
+
+# --- IMPORTANT: SQLite3 Fix for ChromaDB in Deployment Environments ---
+__import__('pysqlite3')
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# --- END SQLite3 Fix ---
+
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
 from langchain_chroma import Chroma
