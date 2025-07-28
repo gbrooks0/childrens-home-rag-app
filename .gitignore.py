@@ -3,7 +3,7 @@ venv/
 
 # Vector Database
 
-# db/
+# faiss_index/
 
 # Python Caches
 __pycache__/

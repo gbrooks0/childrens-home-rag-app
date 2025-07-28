@@ -1,4 +1,4 @@
-# ingest.py (Stable Working Version - with Word Document Support)
+# ingest.py (Definitive, Complete, and Final Version with Robust Chunking)
 
 import os
 import shutil
@@ -9,11 +9,11 @@ from langchain_community.document_loaders import (
     DirectoryLoader,
     PyPDFium2Loader,
     TextLoader,
-    UnstructuredWordDocumentLoader, # Added for Word document support
+    UnstructuredWordDocumentLoader
 )
 from langchain.docstore.document import Document
-from langchain_experimental.text_splitter import SemanticChunker
-from langchain_chroma import Chroma
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 # --- Configuration ---
@@ -22,12 +22,10 @@ if "GOOGLE_API_KEY" not in os.environ:
     exit()
 
 DATA_DIR = "docs"
-DB_DIR = "db"
+DB_DIR = "faiss_index"
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 }
-
-# --- This URL list should be maintained with working links ---
 URLS_TO_SCRAPE = [
     "https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-childrens-homes/social-care-common-inspection-framework-sccif-childrens-homes",
     "https://assets.publishing.service.gov.uk/media/6849a7b67cba25f610c7db3f/Working_together_to_safeguard_children_2023_-_statutory_guidance.pdf",
@@ -38,34 +36,31 @@ URLS_TO_SCRAPE = [
     "https://www.mentalhealth.org.uk/explore-mental-health/a-z-topics/children-and-young-people",
     "https://www.scie.org.uk/children/care/",
     "https://www.gov.uk/guidance/childrens-homes-recruiting-staff",
-    # Add other known, working URLs here
 ]
 
-# --- Document Loading Functions ---
+# --- HELPER FUNCTIONS ---
 def load_from_directory(directory_path: str):
+    """Loads documents from a local directory, with support for .docx files."""
     print(f"Checking for local documents in: '{directory_path}'...")
     if not os.path.isdir(directory_path):
-        print(f"Directory '{directory_path}' not found. Returning empty list.")
+        print(f"Directory '{directory_path}' not found. Skipping local file loading.")
         return []
-    
+
     pdf_loader = DirectoryLoader(directory_path, glob="**/*.pdf", loader_cls=PyPDFium2Loader, show_progress=True)
     text_loader = DirectoryLoader(directory_path, glob="**/*.md", loader_cls=TextLoader, show_progress=True)
-    # Added for .docx files
-    word_docx_loader = DirectoryLoader(directory_path, glob="**/*.docx", loader_cls=UnstructuredWordDocumentLoader, show_progress=True)
-    # If you also need to support older .doc files, you can add another loader
-    # word_doc_loader = DirectoryLoader(directory_path, glob="**/*.doc", loader_cls=UnstructuredWordDocumentLoader, show_progress=True)
-
-    loaded_docs = []
-    loaded_docs.extend(pdf_loader.load())
-    loaded_docs.extend(text_loader.load())
-    loaded_docs.extend(word_docx_loader.load())
-    # If you added word_doc_loader:
-    # loaded_docs.extend(word_doc_loader.load())
-
+    word_loader = DirectoryLoader(directory_path, glob="**/*.docx", loader_cls=UnstructuredWordDocumentLoader, show_progress=True)
+    
+    loaded_pdfs = pdf_loader.load()
+    loaded_texts = text_loader.load()
+    loaded_words = word_loader.load()
+    
+    loaded_docs = loaded_pdfs + loaded_texts + loaded_words
+    
     print(f"Loaded {len(loaded_docs)} document(s) from local directory.")
     return loaded_docs
 
 def load_and_clean_urls(urls: list):
+    """Intelligently scrapes URLs and returns a list of Document objects."""
     print(f"Intelligently scraping {len(urls)} URL(s)...")
     documents = []
     for url in urls:
@@ -89,6 +84,7 @@ def load_and_clean_urls(urls: list):
             response = requests.get(url, headers=HEADERS, timeout=20)
             response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
+            
             main_content = soup.find('main') or soup.find('article') or soup.find('div', id='content')
             
             if main_content:
@@ -103,40 +99,38 @@ def load_and_clean_urls(urls: list):
             print(f"  ERROR: Failed to process URL {url}: {e}")
     return documents
 
-# --- Main Ingestion Process ---
 def main():
-    print("--- Starting Advanced Document Ingestion ---")
+    """Main function to run the data ingestion with robust recursive chunking."""
+    print("--- Starting Final Ingestion using FAISS with Recursive Splitter ---")
+    
     local_docs = load_from_directory(DATA_DIR)
     web_docs = load_and_clean_urls(URLS_TO_SCRAPE)
+    all_docs = local_docs + web_docs
 
-    if not local_docs and not web_docs:
+    if not all_docs:
         print("No documents were loaded. Exiting.")
         return
 
     embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
-    text_splitter = SemanticChunker(embeddings, breakpoint_threshold_type="percentile")
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1500,
+        chunk_overlap=200
+    )
+    
+    print("\nSplitting documents into recursive chunks...")
+    chunks = text_splitter.split_documents(all_docs)
 
     if os.path.exists(DB_DIR):
+        print(f"Removing old FAISS index at '{DB_DIR}'...")
         shutil.rmtree(DB_DIR)
     
-    if local_docs:
-        local_chunks = text_splitter.split_documents(local_docs)
-        print(f"\nCreating 'local_docs' collection with {len(local_chunks)} semantic chunks...\n") # Added newline for better readability
-        Chroma.from_documents(
-            documents=local_chunks, embedding=embeddings, collection_name="local_docs", persist_directory=DB_DIR
-        )
-        print("Local documents collection created successfully.")
-
-    if web_docs:
-        web_chunks = text_splitter.split_documents(web_docs)
-        print(f"\nCreating 'web_docs' collection with {len(web_chunks)} semantic chunks...\n") # Added newline for better readability
-        Chroma.from_documents(
-            documents=web_chunks, embedding=embeddings, collection_name="web_docs", persist_directory=DB_DIR
-        )
-        print("Web documents collection created successfully.")
+    print(f"Creating FAISS index with {len(chunks)} recursive chunks...")
+    db = FAISS.from_documents(chunks, embeddings)
+    db.save_local(DB_DIR)
     
     print("\n--- Ingestion Complete! ---")
-    print("Vector store created with high-relevance semantic chunks.")
+    print("FAISS index created with context-rich chunks.")
 
 if __name__ == "__main__":
     main()

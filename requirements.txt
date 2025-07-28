@@ -1,13 +1,11 @@
 streamlit
 langchain
 langchain-google-genai
-langchain-chroma
 langchain-experimental
 beautifulsoup4
 pypdfium2
 requests
-# --- THIS IS THE FINAL FIX ---
-# Pinning chromadb to a known stable version.
-chromadb==0.4.24
-# Pinning numpy to a version BEFORE the breaking 2.0 update.
-numpy<2.0
+faiss-cpu
+numpy
+unstructured[docx]
+langchain-chroma
