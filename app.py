@@ -91,7 +91,8 @@ for message in st.session_state.messages:
         else:
             st.markdown(message["content"])
 
-if prompt := st.chat_input("Ask a question about children's home standards..."):
+# Updated chat input prompt to reflect broader capabilities
+if prompt := st.chat_input("Ask a question about strategic planning or operations for a children's home..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
