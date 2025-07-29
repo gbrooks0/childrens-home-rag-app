@@ -1,5 +1,15 @@
-# app.py - Enhanced Clean Professional Version
+# app.py - Complete Enhanced Version with All Features
 
+# CRITICAL: SQLite3 Fix MUST be first, before any other imports
+import sys
+try:
+    __import__('pysqlite3')
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+    print("DEBUG: pysqlite3 imported and set as default sqlite3 module.")
+except ImportError:
+    print("DEBUG: pysqlite3 not found, falling back to system sqlite3.")
+
+# Now safe to import other modules
 import streamlit as st
 import os
 import re
@@ -17,7 +27,7 @@ st.set_page_config(
     page_title="Children's Home Management System",
     page_icon="🏠",
     layout="wide",
-    initial_sidebar_state="collapsed"  # Cleaner initial state
+    initial_sidebar_state="collapsed"
 )
 
 # Common question patterns for auto-complete
@@ -64,7 +74,7 @@ def get_contextual_tip(current_input=""):
     elif "budget" in current_input.lower() or "cost" in current_input.lower():
         return "💡 **Tip:** Include your home size, capacity, or specific financial challenges for relevant guidance"
     else:
-        return tips[len(current_input) % len(tips)]  # Rotate tips based on input length
+        return tips[len(current_input) % len(tips)]
 
 def get_question_suggestions(input_text):
     """Get auto-complete suggestions based on user input."""
@@ -77,7 +87,7 @@ def get_question_suggestions(input_text):
     for question in COMMON_QUESTIONS:
         if any(word in question.lower() for word in input_lower.split()):
             suggestions.append(question)
-        if len(suggestions) >= 5:  # Limit to 5 suggestions
+        if len(suggestions) >= 5:
             break
     
     return suggestions
@@ -100,7 +110,7 @@ if st.session_state.rag_system is None:
     st.error("❌ System initialization failed. Please refresh the page.")
     st.stop()
 
-# Minimal CSS for clean design + keyboard shortcut
+# Enhanced CSS for clean design
 st.markdown("""
 <style>
     .main-header {
@@ -108,36 +118,6 @@ st.markdown("""
         padding: 1rem 0 2rem 0;
         border-bottom: 1px solid #f0f0f0;
         margin-bottom: 2rem;
-    }
-    
-    .quick-action-button {
-        display: inline-block;
-        padding: 0.5rem 1rem;
-        margin: 0.25rem;
-        background-color: #f8f9fa;
-        border: 1px solid #dee2e6;
-        border-radius: 20px;
-        color: #495057;
-        text-decoration: none;
-        font-size: 0.9rem;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-    
-    .quick-action-button:hover {
-        background-color: #e9ecef;
-        border-color: #adb5bd;
-    }
-    
-    .suggestion-item {
-        padding: 0.5rem;
-        border-bottom: 1px solid #f0f0f0;
-        cursor: pointer;
-        font-size: 0.9rem;
-    }
-    
-    .suggestion-item:hover {
-        background-color: #f8f9fa;
     }
     
     .contextual-tip {
@@ -153,27 +133,10 @@ st.markdown("""
         margin: 2rem 0;
     }
     
-    .keyboard-hint {
-        color: #6c757d;
-        font-size: 0.8rem;
-        font-style: italic;
-        text-align: center;
-        margin-top: 0.5rem;
+    .quick-action-grid {
+        margin: 1rem 0;
     }
 </style>
-
-<script>
-// Add keyboard shortcut for Ctrl+Enter
-document.addEventListener('keydown', function(e) {
-    if (e.ctrlKey && e.key === 'Enter') {
-        // Find and click the guidance button
-        const button = document.querySelector('[data-testid="baseButton-primary"]');
-        if (button && button.textContent.includes('Get Expert Guidance')) {
-            button.click();
-        }
-    }
-});
-</script>
 """, unsafe_allow_html=True)
 
 # Clean header - HIGHEST POSSIBLE POSITION
@@ -188,154 +151,197 @@ mode_tab1, mode_tab2 = st.tabs(["💬 Ask Questions", "📷 Analyze Images"])
 st.markdown('</div>', unsafe_allow_html=True)
 
 with mode_tab1:
-    # Main question input FIRST - most important function (Suggestion 2)
-    st.subheader("💬 Ask Your Question")
-    
-    # Initialize session state for question
-    if 'current_question' not in st.session_state:
-        st.session_state.current_question = ""
-    
-    # Handle quick action selection
-    if hasattr(st.session_state, 'quick_question'):
-        st.session_state.current_question = st.session_state.quick_question
-        delattr(st.session_state, 'quick_question')
-    
-    # Question input with auto-complete (Suggestion 8)
-    user_question = st.text_area(
-        "Describe your situation or question:",
-        value=st.session_state.current_question,
-        placeholder="Start typing your question... (e.g., 'How do we prepare for...')",
-        height=120,
-        key="question_input"
-    )
-# Get guidance button - ALWAYS VISIBLE with question
-if st.button("🧠 Get Expert Guidance", type="primary", use_container_width=True):
-    if user_question and user_question.strip():
-        # Enhanced loading with progress indicators
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    # Check if we have a result to display
+    if 'current_result' in st.session_state and st.session_state.current_result:
+        # DISPLAY ANSWER AT TOP - replacing question area
+        st.subheader("🧠 Expert Guidance")
+        st.write(st.session_state.current_result["answer"])
         
-        try:
-            # Step 1: Initialize
-            status_text.text("🔍 Analyzing your question...")
-            progress_bar.progress(20)
-            
-            # Step 2: Retrieve relevant documents
-            status_text.text("📚 Searching knowledge base...")
-            progress_bar.progress(40)
-            retriever = st.session_state.rag_system.get_current_retriever()
-            docs = retriever.get_relevant_documents(user_question)
-            
-            # Step 3: Prepare context
-            status_text.text("🧠 Preparing expert context...")
-            progress_bar.progress(60)
-            context = "\n\n".join([doc.page_content for doc in docs])
-            
-            # Step 4: Generate response
-            status_text.text("💭 Generating expert guidance...")
-            progress_bar.progress(80)
-            
-            result = st.session_state.rag_system.query(
-                user_question=user_question,
-                context_text=context,
-                source_docs=docs
-            )
-            
-            # Step 5: Complete
-            status_text.text("✅ Guidance ready!")
-            progress_bar.progress(100)
-            
-            # Clear progress indicators
-            import time
-            time.sleep(0.5)
-            progress_bar.empty()
-            status_text.empty()
-            
-            # Store result and trigger rerun to show answer
-            if result and result.get("answer"):
-                st.session_state.current_result = result
-                st.session_state.current_question = user_question
+        # Action buttons
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("🔄 Ask New Question", type="primary"):
+                # Clear result and show question form again
+                del st.session_state.current_result
+                if 'current_question' in st.session_state:
+                    st.session_state.current_question = ""
                 st.rerun()
-            else:
-                st.error("❌ Sorry, I couldn't generate a response. Please try rephrasing your question.")
-                
-        except Exception as e:
-            # Clear progress indicators on error
-            progress_bar.empty()
-            status_text.empty()
-            
-            st.error("❌ An error occurred while processing your question.")
-            
-            # Show helpful error information
-            with st.expander("🔧 Error Details"):
-                st.code(f"Error type: {type(e).__name__}")
-                st.code(f"Error message: {str(e)}")
-                
-                st.markdown("**💡 Try these solutions:**")
-                st.markdown("""
-                • **Refresh the page** and try again
-                • **Rephrase your question** with more specific details
-                • **Check your internet connection**
-                • **Try a shorter, simpler question first**
-                • **Use one of the Quick Action buttons** instead
-                """)
+        
+        with col2:
+            if st.button("📋 View Key Actions"):
+                st.session_state.show_actions = not st.session_state.get('show_actions', False)
+        
+        with col3:
+            if st.button("📚 View Sources"):
+                st.session_state.show_sources = not st.session_state.get('show_sources', False)
+        
+        # Show additional info if requested
+        if st.session_state.get('show_actions', False):
+            st.markdown("---")
+            st.markdown("**📋 Key Actions:**")
+            st.markdown("• Review with your management team\n• Consider implementation timeline\n• Monitor and evaluate outcomes")
+        
+        if st.session_state.get('show_sources', False) and st.session_state.current_result.get("source_documents"):
+            st.markdown("---")
+            st.markdown(f"**📚 Sources ({len(st.session_state.current_result['source_documents'])} references):**")
+            for i, doc in enumerate(st.session_state.current_result["source_documents"], 1):
+                with st.expander(f"Source {i}"):
+                    preview = doc.page_content[:400] + "..." if len(doc.page_content) > 400 else doc.page_content
+                    st.write(preview)
+    
     else:
-        st.warning("⚠️ Please enter a question to receive guidance")
-    
-    # Auto-complete suggestions (Suggestion 8)
-    if user_question and len(user_question) > 3:
-        suggestions = get_question_suggestions(user_question)
-        if suggestions:
-            st.markdown("**💡 Suggested completions:**")
-            for i, suggestion in enumerate(suggestions):
-                if st.button(f"📝 {suggestion}", key=f"suggestion_{i}"):
-                    st.session_state.current_question = suggestion
-                    st.rerun()
-    
-    # Contextual help (Suggestion 18)
-    tip = get_contextual_tip(user_question)
-    st.markdown(f'<div class="contextual-tip">{tip}</div>', unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Quick Action Buttons (Suggestion 9) - Below question input
-    st.subheader("🚀 Quick Actions")
-    st.markdown("*Or choose from these common scenarios:*")
-    
-    quick_actions = {
-        "🚨 Inspection Prep": "We have an upcoming Ofsted inspection. What should we focus on to ensure we're fully prepared and can demonstrate our improvements?",
-        "💰 Budget Planning": "Help us develop an effective budget strategy for the upcoming financial year while maintaining quality of care.",
-        "👥 Staff Issues": "We're experiencing staff retention challenges. What strategies can we implement to improve staff satisfaction and reduce turnover?",
-        "🏠 New Admission": "We're admitting a new child to our home. What processes and considerations should we prioritize for a successful transition?",
-        "📋 Policy Review": "We need to review and update our policies. What are the current best practices and regulatory requirements we should include?",
-        "🎯 Quality Improvement": "We want to enhance our quality of care and move towards outstanding. What key areas should we focus on?"
-    }
-    
-    # Display quick actions in a clean grid
-    cols = st.columns(3)
-    for i, (action, question) in enumerate(quick_actions.items()):
-        with cols[i % 3]:
-            if st.button(action, key=f"quick_{i}", use_container_width=True):
-                st.session_state.quick_question = question
-    
-    # Optional document upload - simplified
-    with st.expander("📎 Add Supporting Documents (Optional)"):
-        uploaded_file = st.file_uploader(
-            "Upload relevant documents for context",
-            type=['pdf', 'docx', 'txt'],
-            help="Upload policies, reports, or other documents for more tailored guidance"
+        # SHOW QUESTION FORM - only when no result
+        st.subheader("💬 Ask Your Question")
+        
+        # Initialize session state for question
+        if 'current_question' not in st.session_state:
+            st.session_state.current_question = ""
+        
+        # Handle quick action selection
+        if hasattr(st.session_state, 'quick_question'):
+            st.session_state.current_question = st.session_state.quick_question
+            delattr(st.session_state, 'quick_question')
+        
+        # Question input with auto-complete
+        user_question = st.text_area(
+            "Describe your situation or question:",
+            value=st.session_state.current_question,
+            placeholder="Start typing your question... (e.g., 'How do we prepare for...')",
+            height=120,
+            key="question_input"
         )
         
-        if uploaded_file:
-            st.success(f"✅ {uploaded_file.name} uploaded")
-            try:
-                st.session_state.rag_system.process_uploaded_file(uploaded_file.read())
-                st.info("📚 Document integrated for this session")
-            except Exception as e:
-                st.error(f"Failed to process: {e}")
+        # Get guidance button - ALWAYS VISIBLE with question
+        if st.button("🧠 Get Expert Guidance", type="primary", use_container_width=True):
+            if user_question and user_question.strip():
+                # Enhanced loading with progress indicators
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                try:
+                    # Step 1: Initialize
+                    status_text.text("🔍 Analyzing your question...")
+                    progress_bar.progress(20)
+                    
+                    # Step 2: Retrieve relevant documents
+                    status_text.text("📚 Searching knowledge base...")
+                    progress_bar.progress(40)
+                    retriever = st.session_state.rag_system.get_current_retriever()
+                    docs = retriever.get_relevant_documents(user_question)
+                    
+                    # Step 3: Prepare context
+                    status_text.text("🧠 Preparing expert context...")
+                    progress_bar.progress(60)
+                    context = "\n\n".join([doc.page_content for doc in docs])
+                    
+                    # Step 4: Generate response
+                    status_text.text("💭 Generating expert guidance...")
+                    progress_bar.progress(80)
+                    
+                    result = st.session_state.rag_system.query(
+                        user_question=user_question,
+                        context_text=context,
+                        source_docs=docs
+                    )
+                    
+                    # Step 5: Complete
+                    status_text.text("✅ Guidance ready!")
+                    progress_bar.progress(100)
+                    
+                    # Clear progress indicators
+                    import time
+                    time.sleep(0.5)
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    # Store result and trigger rerun to show answer
+                    if result and result.get("answer"):
+                        st.session_state.current_result = result
+                        st.session_state.current_question = user_question
+                        st.rerun()
+                    else:
+                        st.error("❌ Sorry, I couldn't generate a response. Please try rephrasing your question.")
+                        
+                except Exception as e:
+                    # Clear progress indicators on error
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    st.error("❌ An error occurred while processing your question.")
+                    
+                    # Show helpful error information
+                    with st.expander("🔧 Error Details"):
+                        st.code(f"Error type: {type(e).__name__}")
+                        st.code(f"Error message: {str(e)}")
+                        
+                        st.markdown("**💡 Try these solutions:**")
+                        st.markdown("""
+                        • **Refresh the page** and try again
+                        • **Rephrase your question** with more specific details
+                        • **Check your internet connection**
+                        • **Try a shorter, simpler question first**
+                        • **Use one of the Quick Action buttons** instead
+                        """)
+            else:
+                st.warning("⚠️ Please enter a question to receive guidance")
+        
+        # Auto-complete suggestions - only show when typing
+        if user_question and len(user_question) > 3:
+            suggestions = get_question_suggestions(user_question)
+            if suggestions:
+                st.markdown("**💡 Suggested completions:**")
+                for i, suggestion in enumerate(suggestions):
+                    if st.button(f"📝 {suggestion}", key=f"suggestion_{i}"):
+                        st.session_state.current_question = suggestion
+                        st.rerun()
+        
+        # Contextual help
+        tip = get_contextual_tip(user_question)
+        st.markdown(f'<div class="contextual-tip">{tip}</div>', unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # Quick Action Buttons - Below question input
+        st.subheader("🚀 Quick Actions")
+        st.markdown("*Or choose from these common scenarios:*")
+        
+        quick_actions = {
+            "🚨 Inspection Prep": "We have an upcoming Ofsted inspection. What should we focus on to ensure we're fully prepared and can demonstrate our improvements?",
+            "💰 Budget Planning": "Help us develop an effective budget strategy for the upcoming financial year while maintaining quality of care.",
+            "👥 Staff Issues": "We're experiencing staff retention challenges. What strategies can we implement to improve staff satisfaction and reduce turnover?",
+            "🏠 New Admission": "We're admitting a new child to our home. What processes and considerations should we prioritize for a successful transition?",
+            "📋 Policy Review": "We need to review and update our policies. What are the current best practices and regulatory requirements we should include?",
+            "🎯 Quality Improvement": "We want to enhance our quality of care and move towards outstanding. What key areas should we focus on?"
+        }
+        
+        # Display quick actions in a clean grid
+        st.markdown('<div class="quick-action-grid">', unsafe_allow_html=True)
+        cols = st.columns(3)
+        for i, (action, question) in enumerate(quick_actions.items()):
+            with cols[i % 3]:
+                if st.button(action, key=f"quick_{i}", use_container_width=True):
+                    st.session_state.quick_question = question
+                    st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Optional document upload - simplified
+        with st.expander("📎 Add Supporting Documents (Optional)"):
+            uploaded_file = st.file_uploader(
+                "Upload relevant documents for context",
+                type=['pdf', 'docx', 'txt'],
+                help="Upload policies, reports, or other documents for more tailored guidance"
+            )
+            
+            if uploaded_file:
+                st.success(f"✅ {uploaded_file.name} uploaded")
+                try:
+                    st.session_state.rag_system.process_uploaded_file(uploaded_file.read())
+                    st.info("📚 Document integrated for this session")
+                except Exception as e:
+                    st.error(f"Failed to process: {e}")
 
 with mode_tab2:
-    # Visual analysis high on page (Suggestion 6)
+    # Visual analysis high on page
     if not COMPLIANCE_FEATURES_AVAILABLE:
         st.error("❌ Visual analysis features are currently being upgraded.")
         st.info("💡 Use the 'Ask Questions' tab for comprehensive guidance.")
@@ -347,7 +353,7 @@ with mode_tab2:
         if 'compliance_analyzer' not in st.session_state:
             st.session_state.compliance_analyzer = ComplianceAnalyzer(st.session_state.rag_system)
         
-        # Smart image analysis prompts (Suggestion 16 - simplified version)
+        # Smart image analysis prompts
         st.markdown("**🎯 What would you like to focus on?**")
         
         analysis_focus_options = {
@@ -376,7 +382,6 @@ with mode_tab2:
             col1, col2 = st.columns([2, 1])
             
             with col1:
-                # Fixed deprecated parameter (Suggestion 7)
                 st.image(uploaded_image, caption="Image for Analysis", use_container_width=True)
             
             with col2:
@@ -494,8 +499,6 @@ with mode_tab2:
                         • **Refresh the page** and try again
                         • **Use a different image** of the same area
                         """)
-                    
-                    st.warning(f"Debug: {str(e)}")
         else:
             st.info("👆 Upload an image to begin visual analysis")
 
