@@ -202,14 +202,50 @@ with mode_tab1:
             st.session_state.current_question = st.session_state.quick_question
             delattr(st.session_state, 'quick_question')
         
-        # Question input with auto-complete
+        # Question input with keyboard shortcut
         user_question = st.text_area(
             "Describe your situation or question:",
             value=st.session_state.current_question,
-            placeholder="Start typing your question... (e.g., 'How do we prepare for...')",
+            placeholder="Start typing your question... (e.g., 'How do we prepare for...')  |  Press Ctrl+Enter to submit",
             height=120,
-            key="question_input"
+            key="question_input",
+            on_change=None
         )
+        
+        # Add JavaScript for Ctrl+Enter functionality
+        st.markdown("""
+        <script>
+        function addKeyboardShortcut() {
+            const textArea = document.querySelector('textarea[aria-label="Describe your situation or question:"]');
+            if (textArea && !textArea.hasEventListener) {
+                textArea.hasEventListener = true;
+                textArea.addEventListener('keydown', function(e) {
+                    if (e.ctrlKey && e.key === 'Enter') {
+                        e.preventDefault();
+                        // Find the guidance button and click it
+                        const buttons = document.querySelectorAll('button');
+                        for (let button of buttons) {
+                            if (button.textContent.includes('Get Expert Guidance')) {
+                                button.click();
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        
+        // Run after a short delay to ensure DOM is loaded
+        setTimeout(addKeyboardShortcut, 100);
+        
+        // Also run when Streamlit reruns
+        if (window.streamlitReady) {
+            addKeyboardShortcut();
+        } else {
+            window.addEventListener('load', addKeyboardShortcut);
+        }
+        </script>
+        """, unsafe_allow_html=True)
         
         # Get guidance button - ALWAYS VISIBLE with question
         if st.button("🧠 Get Expert Guidance", type="primary", use_container_width=True):
@@ -234,12 +270,66 @@ with mode_tab1:
                     progress_bar.progress(60)
                     context = "\n\n".join([doc.page_content for doc in docs])
                     
-                    # Step 4: Generate response
+                    # Step 4: Generate response with appropriate prompt based on question type
                     status_text.text("💭 Generating expert guidance...")
                     progress_bar.progress(80)
                     
+                    # Determine if this is a factual/informational question or strategic guidance request
+                    question_lower = user_question.lower()
+                    
+                    # Factual question indicators
+                    factual_indicators = [
+                        "what are", "what is", "list", "define", "explain", "describe",
+                        "standards", "requirements", "regulations", "according to",
+                        "how many", "which", "who", "when", "where"
+                    ]
+                    
+                    # Strategic question indicators  
+                    strategic_indicators = [
+                        "how do we", "how can we", "what should we", "help us",
+                        "strategy", "implement", "improve", "develop", "plan",
+                        "guidance", "advice", "recommend", "approach", "best practice"
+                    ]
+                    
+                    is_factual = any(indicator in question_lower for indicator in factual_indicators)
+                    is_strategic = any(indicator in question_lower for indicator in strategic_indicators)
+                    
+                    if is_factual and not is_strategic:
+                        # Provide comprehensive factual information
+                        enhanced_question = f"""
+                        Question: {user_question}
+                        
+                        Please provide a comprehensive and detailed factual response that covers:
+                        1. Complete listing of all relevant standards/requirements
+                        2. Specific regulation numbers where applicable
+                        3. Clear explanation of what each standard covers
+                        4. Key requirements and expectations for each
+                        5. Important details that practitioners need to know
+                        6. Any interconnections between different standards
+                        
+                        Format as clear, informative content with proper structure and detail. Focus on accuracy and completeness of factual information.
+                        """
+                    else:
+                        # Provide strategic guidance
+                        enhanced_question = f"""
+                        As a senior children's home management consultant, provide comprehensive strategic and operational guidance for:
+                        
+                        Question: {user_question}
+                        
+                        Please provide:
+                        1. Strategic considerations and business implications
+                        2. Practical implementation steps with timelines
+                        3. Risk management and mitigation strategies  
+                        4. Child-centered impact assessment
+                        5. Resource requirements and cost considerations
+                        6. Success metrics and monitoring approaches
+                        7. Specific actionable recommendations
+                        
+                        Format your response as professional management guidance for children's home leaders.
+                        """
+                    
                     result = st.session_state.rag_system.query(
-                        user_question=user_question,
+                        user_question=enhanced_question,
                         context_text=context,
                         source_docs=docs
                     )
