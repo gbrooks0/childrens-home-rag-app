@@ -100,7 +100,7 @@ if st.session_state.rag_system is None:
     st.error("❌ System initialization failed. Please refresh the page.")
     st.stop()
 
-# Minimal CSS for clean design
+# Minimal CSS for clean design + keyboard shortcut
 st.markdown("""
 <style>
     .main-header {
@@ -152,7 +152,28 @@ st.markdown("""
     .tab-container {
         margin: 2rem 0;
     }
+    
+    .keyboard-hint {
+        color: #6c757d;
+        font-size: 0.8rem;
+        font-style: italic;
+        text-align: center;
+        margin-top: 0.5rem;
+    }
 </style>
+
+<script>
+// Add keyboard shortcut for Ctrl+Enter
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 'Enter') {
+        // Find and click the guidance button
+        const button = document.querySelector('[data-testid="baseButton-primary"]');
+        if (button && button.textContent.includes('Get Expert Guidance')) {
+            button.click();
+        }
+    }
+});
+</script>
 """, unsafe_allow_html=True)
 
 # Clean header - HIGHEST POSSIBLE POSITION
