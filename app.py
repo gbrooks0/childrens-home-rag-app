@@ -1,4 +1,5 @@
-# app.py - Complete Enhanced Version with All Features
+# app.py - FINAL COMPLETE VERSION WITH ALL FIXES
+# Includes all enhancements and fixes discussed in our conversation
 
 # CRITICAL: SQLite3 Fix MUST be first, before any other imports
 import sys
@@ -9,10 +10,11 @@ try:
 except ImportError:
     print("DEBUG: pysqlite3 not found, falling back to system sqlite3.")
 
-# Now safe to import other modules
+# Safe imports after SQLite fix
 import streamlit as st
 import os
 import re
+import time
 from rag_system import RAGSystem
 
 # Safe import for compliance features
@@ -30,7 +32,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Common question patterns for auto-complete
+# ENHANCED FEATURES: Auto-complete question database
 COMMON_QUESTIONS = [
     "How do we prepare for an Ofsted inspection?",
     "What are the requirements for staff training?",
@@ -51,11 +53,16 @@ COMMON_QUESTIONS = [
     "How do we manage relationships with social workers?",
     "What training is required for new staff?",
     "How do we implement positive behavior support?",
-    "What are the requirements for recording and reporting?"
+    "What are the requirements for recording and reporting?",
+    "What are the quality standards for children's homes according to Ofsted?",
+    "How do we improve our Ofsted rating from Good to Outstanding?",
+    "What are the staffing requirements for children's homes?",
+    "How do we handle financial management and budgeting?",
+    "What policies and procedures do we need?"
 ]
 
 def get_contextual_tip(current_input=""):
-    """Provide contextual tips based on what user is typing."""
+    """ENHANCED FEATURE: Provide dynamic contextual tips based on user input."""
     tips = [
         "💡 **Tip:** Include specific details like ages, timelines, or current challenges for more targeted advice",
         "💡 **Tip:** Mention your current Ofsted rating if asking about improvements or inspections",
@@ -73,11 +80,13 @@ def get_contextual_tip(current_input=""):
         return "💡 **Tip:** Specify staff roles, experience levels, or specific training needs for targeted advice"
     elif "budget" in current_input.lower() or "cost" in current_input.lower():
         return "💡 **Tip:** Include your home size, capacity, or specific financial challenges for relevant guidance"
+    elif "draft" in current_input.lower() or "write" in current_input.lower():
+        return "💡 **Tip:** Provide context about the purpose, audience, and key points you want to include"
     else:
         return tips[len(current_input) % len(tips)]
 
 def get_question_suggestions(input_text):
-    """Get auto-complete suggestions based on user input."""
+    """ENHANCED FEATURE: Auto-complete suggestions based on user input."""
     if len(input_text) < 3:
         return []
     
@@ -102,15 +111,16 @@ def initialize_rag_system():
         st.error(f"Failed to initialize RAG System: {e}")
         return None
 
+# ENHANCED INITIALIZATION with proper error handling
 if 'rag_system' not in st.session_state:
-    with st.spinner("Initializing system..."):
+    with st.spinner("Initializing comprehensive guidance system..."):
         st.session_state.rag_system = initialize_rag_system()
 
 if st.session_state.rag_system is None:
     st.error("❌ System initialization failed. Please refresh the page.")
     st.stop()
 
-# Enhanced CSS for clean design
+# ENHANCED CSS for professional appearance
 st.markdown("""
 <style>
     .main-header {
@@ -136,28 +146,40 @@ st.markdown("""
     .quick-action-grid {
         margin: 1rem 0;
     }
+    
+    .model-attribution {
+        font-size: 0.8rem;
+        color: #6c757d;
+        font-style: italic;
+        margin-bottom: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Clean header - HIGHEST POSSIBLE POSITION
+# CLEAN HEADER - Positioned at very top as requested
 st.markdown('<div class="main-header">', unsafe_allow_html=True)
 st.title("🏠 Children's Home Management System")
 st.markdown("*Strategic, operational & compliance guidance for residential care*")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Clean tab interface immediately after title
+# CLEAN TAB INTERFACE - Immediately after title as requested
 st.markdown('<div class="tab-container">', unsafe_allow_html=True)
 mode_tab1, mode_tab2 = st.tabs(["💬 Ask Questions", "📷 Analyze Images"])
 st.markdown('</div>', unsafe_allow_html=True)
 
 with mode_tab1:
-    # Check if we have a result to display
+    # ENHANCED FEATURE: Answer replacement at top of page
     if 'current_result' in st.session_state and st.session_state.current_result:
         # DISPLAY ANSWER AT TOP - replacing question area
         st.subheader("🧠 Expert Guidance")
+        
+        # ENHANCED FEATURE: Show which AI model was used
+        if 'model_used' in st.session_state and st.session_state.model_used:
+            st.markdown(f'<div class="model-attribution">Response generated by {st.session_state.model_used}</div>', unsafe_allow_html=True)
+        
         st.write(st.session_state.current_result["answer"])
         
-        # Action buttons
+        # CLEAN ACTION BUTTONS
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("🔄 Ask New Question", type="primary"):
@@ -165,6 +187,8 @@ with mode_tab1:
                 del st.session_state.current_result
                 if 'current_question' in st.session_state:
                     st.session_state.current_question = ""
+                if 'model_used' in st.session_state:
+                    del st.session_state.model_used
                 st.rerun()
         
         with col2:
@@ -175,7 +199,7 @@ with mode_tab1:
             if st.button("📚 View Sources"):
                 st.session_state.show_sources = not st.session_state.get('show_sources', False)
         
-        # Show additional info if requested
+        # ENHANCED FEATURE: Progressive disclosure of additional information
         if st.session_state.get('show_actions', False):
             st.markdown("---")
             st.markdown("**📋 Key Actions:**")
@@ -190,112 +214,175 @@ with mode_tab1:
                     st.write(preview)
     
     else:
-        # SHOW QUESTION FORM - only when no result
+        # ENHANCED QUESTION FORM - Only when no result
         st.subheader("💬 Ask Your Question")
         
         # Initialize session state for question
         if 'current_question' not in st.session_state:
             st.session_state.current_question = ""
         
-        # Handle quick action selection
+        # ENHANCED FEATURE: Handle quick action selection
         if hasattr(st.session_state, 'quick_question'):
             st.session_state.current_question = st.session_state.quick_question
             delattr(st.session_state, 'quick_question')
         
-        # Question input with keyboard shortcut
+        # ENHANCED QUESTION INPUT with keyboard shortcut support
         user_question = st.text_area(
             "Describe your situation or question:",
             value=st.session_state.current_question,
             placeholder="Start typing your question... (e.g., 'How do we prepare for...')  |  Press Ctrl+Enter to submit",
             height=120,
-            key="question_input",
-            on_change=None
+            key="question_input"
         )
         
-        # Add JavaScript for Ctrl+Enter functionality
-        st.markdown("""
+        # ENHANCED FEATURE: Robust Ctrl+Enter functionality
+        st.components.v1.html("""
         <script>
-        function addKeyboardShortcut() {
-            const textArea = document.querySelector('textarea[aria-label="Describe your situation or question:"]');
-            if (textArea && !textArea.hasEventListener) {
-                textArea.hasEventListener = true;
-                textArea.addEventListener('keydown', function(e) {
-                    if (e.ctrlKey && e.key === 'Enter') {
+        function setupKeyboardShortcut() {
+            // Find the textarea by looking for the specific placeholder text
+            const textAreas = document.querySelectorAll('textarea');
+            let targetTextArea = null;
+            
+            for (let textarea of textAreas) {
+                if (textarea.placeholder && textarea.placeholder.includes('Start typing your question')) {
+                    targetTextArea = textarea;
+                    break;
+                }
+            }
+            
+            if (targetTextArea && !targetTextArea.hasCtrlEnterListener) {
+                targetTextArea.hasCtrlEnterListener = true;
+                
+                targetTextArea.addEventListener('keydown', function(e) {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                         e.preventDefault();
-                        // Find the guidance button and click it
+                        e.stopPropagation();
+                        
+                        // Find and click the Get Expert Guidance button
                         const buttons = document.querySelectorAll('button');
                         for (let button of buttons) {
-                            if (button.textContent.includes('Get Expert Guidance')) {
+                            const buttonText = button.textContent || button.innerText;
+                            if (buttonText.includes('Get Expert Guidance')) {
+                                console.log('Keyboard shortcut triggered - clicking button');
                                 button.click();
-                                break;
+                                return;
                             }
+                        }
+                        
+                        // Alternative: try finding by button attributes
+                        const primaryButtons = document.querySelectorAll('button[kind="primary"]');
+                        if (primaryButtons.length > 0) {
+                            console.log('Fallback: clicking primary button');
+                            primaryButtons[0].click();
                         }
                     }
                 });
+                
+                console.log('Ctrl+Enter listener added successfully');
             }
         }
         
-        // Run after a short delay to ensure DOM is loaded
-        setTimeout(addKeyboardShortcut, 100);
+        // Try multiple times to ensure it works across Streamlit reruns
+        setTimeout(setupKeyboardShortcut, 100);
+        setTimeout(setupKeyboardShortcut, 500);
+        setTimeout(setupKeyboardShortcut, 1000);
         
-        // Also run when Streamlit reruns
-        if (window.streamlitReady) {
-            addKeyboardShortcut();
-        } else {
-            window.addEventListener('load', addKeyboardShortcut);
-        }
+        // Set up observer for when Streamlit reruns the page
+        const observer = new MutationObserver(function(mutations) {
+            setupKeyboardShortcut();
+        });
+        
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
         </script>
-        """, unsafe_allow_html=True)
+        """, height=0)
         
-        # Get guidance button - ALWAYS VISIBLE with question
-        if st.button("🧠 Get Expert Guidance", type="primary", use_container_width=True):
+        # MAIN SUBMIT BUTTON - Always visible as requested
+        button_clicked = st.button("🧠 Get Expert Guidance", type="primary", use_container_width=True, key="guidance_button")
+        
+        # ENHANCED PROCESSING with improved loading indicators and dual model support
+        if button_clicked:
             if user_question and user_question.strip():
-                # Enhanced loading with progress indicators
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+                # ENHANCED FEATURE: Improved loading indicators
+                progress_container = st.empty()
+                status_container = st.empty()
                 
                 try:
-                    # Step 1: Initialize
-                    status_text.text("🔍 Analyzing your question...")
-                    progress_bar.progress(20)
+                    # Step 1: Initialize with visible progress
+                    with progress_container.container():
+                        progress_bar = st.progress(0)
+                    with status_container.container():
+                        st.info("🔍 Analyzing your question...")
+                    time.sleep(0.5)
                     
                     # Step 2: Retrieve relevant documents
-                    status_text.text("📚 Searching knowledge base...")
-                    progress_bar.progress(40)
+                    with progress_container.container():
+                        progress_bar = st.progress(40)
+                    with status_container.container():
+                        st.info("📚 Searching knowledge base...")
+                    
                     retriever = st.session_state.rag_system.get_current_retriever()
                     docs = retriever.get_relevant_documents(user_question)
+                    time.sleep(0.5)
                     
                     # Step 3: Prepare context
-                    status_text.text("🧠 Preparing expert context...")
-                    progress_bar.progress(60)
+                    with progress_container.container():
+                        progress_bar = st.progress(60)
+                    with status_container.container():
+                        st.info("🧠 Preparing expert context...")
+                    
                     context = "\n\n".join([doc.page_content for doc in docs])
+                    time.sleep(0.5)
                     
-                    # Step 4: Generate response with appropriate prompt based on question type
-                    status_text.text("💭 Generating expert guidance...")
-                    progress_bar.progress(80)
+                    # Step 4: ENHANCED FEATURE - Smart response type detection
+                    with progress_container.container():
+                        progress_bar = st.progress(80)
+                    with status_container.container():
+                        st.info("💭 Generating expert guidance...")
                     
-                    # Determine if this is a factual/informational question or strategic guidance request
+                    # ENHANCED FEATURE: Three response types based on question intent
                     question_lower = user_question.lower()
                     
-                    # Factual question indicators
+                    # Creation/drafting requests - user wants actual deliverable
+                    creation_indicators = [
+                        "draft", "write", "create", "develop a", "make a", "compose",
+                        "help me write", "help me draft", "help me create", "generate a",
+                        "design a", "build a", "prepare a", "produce a"
+                    ]
+                    
+                    # Factual/informational questions - user wants information
                     factual_indicators = [
                         "what are", "what is", "list", "define", "explain", "describe",
                         "standards", "requirements", "regulations", "according to",
-                        "how many", "which", "who", "when", "where"
+                        "how many", "which", "who", "when", "where", "tell me about"
                     ]
                     
-                    # Strategic question indicators  
+                    # Strategic guidance requests - user wants strategic advice
                     strategic_indicators = [
-                        "how do we", "how can we", "what should we", "help us",
-                        "strategy", "implement", "improve", "develop", "plan",
-                        "guidance", "advice", "recommend", "approach", "best practice"
+                        "how do we", "how can we", "what should we", "help us develop",
+                        "strategy for", "approach to", "improve our", "best practices for",
+                        "guidance on", "advice on", "recommend", "suggestions for"
                     ]
                     
+                    is_creation_request = any(indicator in question_lower for indicator in creation_indicators)
                     is_factual = any(indicator in question_lower for indicator in factual_indicators)
                     is_strategic = any(indicator in question_lower for indicator in strategic_indicators)
                     
-                    if is_factual and not is_strategic:
-                        # Provide comprehensive factual information
+                    if is_creation_request:
+                        # User wants something created/drafted
+                        enhanced_question = f"""
+                        The user is asking you to create/draft something specific. Please provide the actual deliverable they requested, not strategic advice about how to create it.
+                        
+                        Request: {user_question}
+                        
+                        Please create the specific item requested (email, policy, plan, document, etc.) in a ready-to-use format. Focus on providing the actual content they can use directly, not guidance about how to create it.
+                        
+                        Format the response as the finished deliverable with appropriate structure, professional language, and complete content.
+                        """
+                    elif is_factual and not is_strategic:
+                        # User wants factual information
                         enhanced_question = f"""
                         Question: {user_question}
                         
@@ -310,7 +397,7 @@ with mode_tab1:
                         Format as clear, informative content with proper structure and detail. Focus on accuracy and completeness of factual information.
                         """
                     else:
-                        # Provide strategic guidance
+                        # User wants strategic guidance
                         enhanced_question = f"""
                         As a senior children's home management consultant, provide comprehensive strategic and operational guidance for:
                         
@@ -328,38 +415,51 @@ with mode_tab1:
                         Format your response as professional management guidance for children's home leaders.
                         """
                     
+                    # ENHANCED FEATURE: Use dual-model system from rag_system.py
                     result = st.session_state.rag_system.query(
                         user_question=enhanced_question,
                         context_text=context,
                         source_docs=docs
                     )
                     
-                    # Step 5: Complete
-                    status_text.text("✅ Guidance ready!")
-                    progress_bar.progress(100)
+                    # Step 5: Complete with model attribution
+                    with progress_container.container():
+                        progress_bar = st.progress(100)
+                    
+                    # ENHANCED FEATURE: Show which model was used
+                    if result and result.get("metadata") and result["metadata"].get("llm_used"):
+                        used_model = result["metadata"]["llm_used"]
+                        with status_container.container():
+                            st.success(f"✅ Response generated by {used_model}")
+                    else:
+                        with status_container.container():
+                            st.success("✅ Guidance ready!")
+                    
+                    time.sleep(1)  # Let users see completion
                     
                     # Clear progress indicators
-                    import time
-                    time.sleep(0.5)
-                    progress_bar.empty()
-                    status_text.empty()
+                    progress_container.empty()
+                    status_container.empty()
                     
-                    # Store result and trigger rerun to show answer
+                    # ENHANCED FEATURE: Store result and show at top
                     if result and result.get("answer"):
                         st.session_state.current_result = result
                         st.session_state.current_question = user_question
+                        # Store which model was used for display
+                        if result.get("metadata") and result["metadata"].get("llm_used"):
+                            st.session_state.model_used = result["metadata"]["llm_used"]
                         st.rerun()
                     else:
-                        st.error("❌ Sorry, I couldn't generate a response. Please try rephrasing your question.")
+                        st.error("❌ Sorry, I couldn't generate a response. This might indicate an issue with both Gemini and ChatGPT models.")
+                        st.info("💡 The system attempts to use both Gemini and ChatGPT with smart routing. If both fail, please check your API configuration or try again later.")
                         
                 except Exception as e:
-                    # Clear progress indicators on error
-                    progress_bar.empty()
-                    status_text.empty()
+                    # ENHANCED ERROR HANDLING
+                    progress_container.empty()
+                    status_container.empty()
                     
                     st.error("❌ An error occurred while processing your question.")
                     
-                    # Show helpful error information
                     with st.expander("🔧 Error Details"):
                         st.code(f"Error type: {type(e).__name__}")
                         st.code(f"Error message: {str(e)}")
@@ -375,7 +475,7 @@ with mode_tab1:
             else:
                 st.warning("⚠️ Please enter a question to receive guidance")
         
-        # Auto-complete suggestions - only show when typing
+        # ENHANCED FEATURE: Auto-complete suggestions
         if user_question and len(user_question) > 3:
             suggestions = get_question_suggestions(user_question)
             if suggestions:
@@ -385,13 +485,13 @@ with mode_tab1:
                         st.session_state.current_question = suggestion
                         st.rerun()
         
-        # Contextual help
+        # ENHANCED FEATURE: Contextual help
         tip = get_contextual_tip(user_question)
         st.markdown(f'<div class="contextual-tip">{tip}</div>', unsafe_allow_html=True)
         
         st.markdown("---")
         
-        # Quick Action Buttons - Below question input
+        # ENHANCED FEATURE: Quick Action Buttons
         st.subheader("🚀 Quick Actions")
         st.markdown("*Or choose from these common scenarios:*")
         
@@ -414,7 +514,7 @@ with mode_tab1:
                     st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Optional document upload - simplified
+        # ENHANCED FEATURE: Document upload
         with st.expander("📎 Add Supporting Documents (Optional)"):
             uploaded_file = st.file_uploader(
                 "Upload relevant documents for context",
@@ -431,7 +531,7 @@ with mode_tab1:
                     st.error(f"Failed to process: {e}")
 
 with mode_tab2:
-    # Visual analysis high on page
+    # ENHANCED VISUAL ANALYSIS TAB
     if not COMPLIANCE_FEATURES_AVAILABLE:
         st.error("❌ Visual analysis features are currently being upgraded.")
         st.info("💡 Use the 'Ask Questions' tab for comprehensive guidance.")
@@ -443,7 +543,7 @@ with mode_tab2:
         if 'compliance_analyzer' not in st.session_state:
             st.session_state.compliance_analyzer = ComplianceAnalyzer(st.session_state.rag_system)
         
-        # Smart image analysis prompts
+        # ENHANCED FEATURE: Smart image analysis prompts
         st.markdown("**🎯 What would you like to focus on?**")
         
         analysis_focus_options = {
@@ -472,6 +572,7 @@ with mode_tab2:
             col1, col2 = st.columns([2, 1])
             
             with col1:
+                # FIXED: use_container_width instead of deprecated use_column_width
                 st.image(uploaded_image, caption="Image for Analysis", use_container_width=True)
             
             with col2:
@@ -498,37 +599,45 @@ with mode_tab2:
             )
             
             if st.button("🔍 Analyze Image", type="primary", use_container_width=True):
-                # Enhanced loading for image analysis
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+                # ENHANCED loading for image analysis
+                progress_container = st.empty()
+                status_container = st.empty()
                 
                 try:
                     # Step 1: Prepare analysis
-                    status_text.text("📷 Processing uploaded image...")
-                    progress_bar.progress(25)
+                    with progress_container.container():
+                        progress_bar = st.progress(25)
+                    with status_container.container():
+                        st.info("📷 Processing uploaded image...")
                     
                     question = custom_focus if custom_focus.strip() else "Analyze this image comprehensively for compliance, quality, and child experience."
                     image_bytes = uploaded_image.read()
+                    time.sleep(0.5)
                     
                     # Step 2: Initialize analyzer
-                    status_text.text("🧠 Initializing compliance analysis...")
-                    progress_bar.progress(50)
+                    with progress_container.container():
+                        progress_bar = st.progress(50)
+                    with status_container.container():
+                        st.info("🧠 Initializing compliance analysis...")
+                    time.sleep(0.5)
                     
                     # Step 3: Conduct analysis
-                    status_text.text("🔍 Conducting comprehensive visual analysis...")
-                    progress_bar.progress(75)
+                    with progress_container.container():
+                        progress_bar = st.progress(75)
+                    with status_container.container():
+                        st.info("🔍 Conducting comprehensive visual analysis...")
                     
                     result = st.session_state.compliance_analyzer.analyze_image_compliance(question, image_bytes)
                     
                     # Step 4: Complete
-                    status_text.text("✅ Analysis complete!")
-                    progress_bar.progress(100)
+                    with progress_container.container():
+                        progress_bar = st.progress(100)
+                    with status_container.container():
+                        st.success("✅ Analysis complete!")
                     
-                    # Clear progress indicators
-                    import time
-                    time.sleep(0.5)
-                    progress_bar.empty()
-                    status_text.empty()
+                    time.sleep(1)
+                    progress_container.empty()
+                    status_container.empty()
                     
                     if result:
                         # Clean results display
@@ -573,12 +682,11 @@ with mode_tab2:
                         
                 except Exception as e:
                     # Clear progress indicators on error
-                    progress_bar.empty()
-                    status_text.empty()
+                    progress_container.empty()
+                    status_container.empty()
                     
                     st.error("❌ Image analysis failed.")
                     
-                    # Show helpful error information  
                     with st.expander("🔧 Error Details"):
                         st.code(f"Error: {str(e)}")
                         st.markdown("**💡 Try these solutions:**")
@@ -589,33 +697,5 @@ with mode_tab2:
                         • **Refresh the page** and try again
                         • **Use a different image** of the same area
                         """)
-        else:
-            st.info("👆 Upload an image to begin visual analysis")
 
-# Minimal sidebar with just essential status
-with st.sidebar:
-    st.markdown("### 📊 System Status")
-    st.success("✅ Guidance System: Online")
-    st.success("✅ Knowledge Base: Current")
-    if COMPLIANCE_FEATURES_AVAILABLE:
-        st.success("✅ Visual Analysis: Available")
-    else:
-        st.info("ℹ️ Visual Analysis: Upgrading")
-    
-    # Quick help
-    with st.expander("❓ Quick Help"):
-        st.markdown("""
-        **Ask Questions:**
-        • Use quick actions for common scenarios
-        • Be specific about your situation
-        • Include relevant context and timelines
-        
-        **Visual Analysis:**
-        • Upload clear, well-lit images
-        • Use focus options for targeted analysis
-        • Review all findings and recommendations
-        """)
-
-# Clean footer
-st.markdown("---")
-st.markdown("🏠 **Children's Home Management System** - Professional guidance for residential care excellence")
+# Add any additional functionality or initialization here if needed
