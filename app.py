@@ -208,6 +208,79 @@ with mode_tab1:
         height=120,
         key="question_input"
     )
+# Get guidance button - ALWAYS VISIBLE with question
+if st.button("🧠 Get Expert Guidance", type="primary", use_container_width=True):
+    if user_question and user_question.strip():
+        # Enhanced loading with progress indicators
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        try:
+            # Step 1: Initialize
+            status_text.text("🔍 Analyzing your question...")
+            progress_bar.progress(20)
+            
+            # Step 2: Retrieve relevant documents
+            status_text.text("📚 Searching knowledge base...")
+            progress_bar.progress(40)
+            retriever = st.session_state.rag_system.get_current_retriever()
+            docs = retriever.get_relevant_documents(user_question)
+            
+            # Step 3: Prepare context
+            status_text.text("🧠 Preparing expert context...")
+            progress_bar.progress(60)
+            context = "\n\n".join([doc.page_content for doc in docs])
+            
+            # Step 4: Generate response
+            status_text.text("💭 Generating expert guidance...")
+            progress_bar.progress(80)
+            
+            result = st.session_state.rag_system.query(
+                user_question=user_question,
+                context_text=context,
+                source_docs=docs
+            )
+            
+            # Step 5: Complete
+            status_text.text("✅ Guidance ready!")
+            progress_bar.progress(100)
+            
+            # Clear progress indicators
+            import time
+            time.sleep(0.5)
+            progress_bar.empty()
+            status_text.empty()
+            
+            # Store result and trigger rerun to show answer
+            if result and result.get("answer"):
+                st.session_state.current_result = result
+                st.session_state.current_question = user_question
+                st.rerun()
+            else:
+                st.error("❌ Sorry, I couldn't generate a response. Please try rephrasing your question.")
+                
+        except Exception as e:
+            # Clear progress indicators on error
+            progress_bar.empty()
+            status_text.empty()
+            
+            st.error("❌ An error occurred while processing your question.")
+            
+            # Show helpful error information
+            with st.expander("🔧 Error Details"):
+                st.code(f"Error type: {type(e).__name__}")
+                st.code(f"Error message: {str(e)}")
+                
+                st.markdown("**💡 Try these solutions:**")
+                st.markdown("""
+                • **Refresh the page** and try again
+                • **Rephrase your question** with more specific details
+                • **Check your internet connection**
+                • **Try a shorter, simpler question first**
+                • **Use one of the Quick Action buttons** instead
+                """)
+    else:
+        st.warning("⚠️ Please enter a question to receive guidance")
     
     # Auto-complete suggestions (Suggestion 8)
     if user_question and len(user_question) > 3:
