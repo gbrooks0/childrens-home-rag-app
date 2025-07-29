@@ -1,6 +1,9 @@
 # app.py (Definitive Final Version with Smart Routing LLM Support and API Key Fix)
-
 import streamlit as st
+
+# Force clear all caches on startup
+st.cache_data.clear()
+st.cache_resource.clear()
 from rag_system import RAGSystem
 import asyncio
 import os
