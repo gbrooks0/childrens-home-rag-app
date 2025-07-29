@@ -45,6 +45,7 @@ class QuestionCategory(Enum):
     """Enumeration for question classification types."""
     REGULATORY_FACTUAL = "Regulatory_Factual"
     STRATEGIC_ANALYTICAL = "Strategic_Analytical"
+    GENERAL_INQUIRY = "General_Inquiry"
 
 class LLMProvider(Enum):
     """Enumeration for LLM providers."""
@@ -126,6 +127,38 @@ def performance_timer():
     finally:
         pass
 
+class ConversationMemory:
+    """Simple conversation memory for better follow-up handling."""
+    
+    def __init__(self, max_history: int = 5):
+        self.max_history = max_history
+        self.conversation_history: List[Dict[str, str]] = []
+    
+    def add_exchange(self, question: str, answer: str, category: str):
+        """Add a question-answer exchange to memory."""
+        self.conversation_history.append({
+            "question": question,
+            "answer": answer,
+            "category": category,
+            "timestamp": time.time()
+        })
+        
+        # Keep only recent exchanges
+        if len(self.conversation_history) > self.max_history:
+            self.conversation_history = self.conversation_history[-self.max_history:]
+    
+    def get_context_for_followup(self) -> str:
+        """Get conversation context for follow-up questions."""
+        if not self.conversation_history:
+            return ""
+        
+        context_parts = []
+        for exchange in self.conversation_history[-3:]:  # Last 3 exchanges
+            context_parts.append(f"Previous Q: {exchange['question']}")
+            context_parts.append(f"Previous A: {exchange['answer'][:200]}...")
+        
+        return "\n".join(context_parts)
+
 class EnhancedRAGSystem:
     """
     Enhanced RAG System with improved error handling, performance monitoring,
@@ -133,9 +166,9 @@ class EnhancedRAGSystem:
     """
     
     # Advanced prompt templates
-    ADVANCED_PROMPT_TEMPLATE = """---
+ADVANCED_PROMPT_TEMPLATE = """---
 **ROLE AND GOAL**
-You are a highly experienced and professional consultant specializing in the operation and strategic planning of children's homes, deeply knowledgeable in Ofsted regulations and best practices. Your goal is to provide clear, actionable, and expert advice, proactively anticipating user needs and offering comprehensive, analytical feedback that informs strategic decision-making, based *only* on the provided context.
+You are a highly knowledgeable assistant with specialized expertise in children's homes operations, strategic planning, Ofsted regulations, and care sector best practices. While your primary specialization is in children's homes, you are also capable of providing helpful, accurate responses on a wide variety of topics using the available context.
 
 ---
 **CONTEXT**
@@ -143,19 +176,27 @@ You are a highly experienced and professional consultant specializing in the ope
 
 ---
 **OUTPUT RULES**
-1.  **Comprehensive Synthesis and Cross-Referencing:** For questions about standards, policies, or detailed procedures, provide a complete answer by synthesizing information from multiple relevant sections of the context. Identify and explain connections or interdependencies between different standards or pieces of information.
-2.  **Actionable Advice and Practical Implications:** Translate factual information into concrete, actionable recommendations or insights. For each key standard or topic, suggest practical steps a children's home can take to comply with or excel in that area, and explain the practical implications for daily operations.
-3.  **Deeper Analysis and "Why/How":** Go beyond stating facts. Where applicable, explain the underlying principles or the 'why' behind a regulation, and offer insights into effective implementation strategies or 'how-to' guidance.
-4.  **Nuance and Contextual Considerations:** If the context provides for variations or nuances (e.g., for specific types of children's homes or children with particular needs), include these considerations in your analysis to provide a well-rounded perspective.
-5.  **Identify Potential Challenges or Areas of Focus:** Based on the provided context, identify any common challenges in meeting certain standards or key areas that often require particular attention during inspections or operations.
-6.  **Stick to the Context:** Base your entire answer strictly on the CONTEXT provided above. Do not use outside knowledge.
-7.  **Handle Missing Information:** If the context does not contain the information needed to answer the question, you MUST explicitly state: "Based on the provided context, I cannot answer this question." Do not try to guess or infer information that isn't present.
+1.  **Leverage Your Expertise:** When questions relate to children's homes, care regulations, or related topics, draw upon your specialized knowledge to provide comprehensive, expert-level guidance that goes beyond basic information.
 
----
-**FORMATTING RULES**
-- Use Markdown for clear formatting (e.g., **bold** for emphasis, bullet points for lists, numbered lists for ordered items).
-- **For Lists of Standards/Criteria:** Use a numbered list for primary standards, and nested bullet points (`*` or `-`) for elaborations under each standard.
-- **IMPORTANT:** When the user's question implies a comparison between two or more items, policies, or concepts, you MUST format your core answer as a Markdown table.
+2.  **Comprehensive Context Utilization:** Extract and synthesize all relevant information from the provided context. Connect different pieces of information and explain relationships between concepts, standards, or procedures.
+
+3.  **Actionable and Strategic Insights:** Transform information into practical, actionable recommendations. For regulatory content, explain compliance strategies. For operational topics, suggest implementation approaches. For strategic questions, provide analytical insights.
+
+4.  **Anticipate Follow-up Needs:** Structure your response to naturally invite follow-up questions. When appropriate, mention related topics or areas that might warrant further exploration, and suggest specific follow-up questions the user might want to ask.
+
+5.  **Flexible Context Handling:** 
+   - If the context fully addresses the question, provide a comprehensive answer
+   - If the context partially addresses the question, provide what you can and clearly indicate what additional information would be helpful
+   - If the context doesn't contain relevant information, acknowledge this and suggest how the question might be refined or what type of context would be needed
+
+6.  **Professional and Accessible:** Maintain a professional tone while ensuring accessibility. Use clear explanations for complex concepts and provide context for technical terms.
+
+7.  **Clear Formatting:** Use Markdown for optimal readability:
+   - **Bold** for key points and emphasis
+   - Bullet points for lists and action items
+   - Numbered lists for sequential steps or ranked priorities
+   - Tables for comparisons when appropriate
+   - Headers for organizing complex responses
 
 ---
 **QUESTION**
@@ -165,21 +206,24 @@ You are a highly experienced and professional consultant specializing in the ope
 **YOUR EXPERT RESPONSE:**"""
 
     CLASSIFICATION_PROMPT = """
-    Analyze the following user question and classify its primary intent into one of these two categories:
-    - 'Regulatory_Factual': Questions asking for specific standards, regulations, definitions, or direct information from official documents.
-    - 'Strategic_Analytical': Questions asking for advice, analysis, implications, comparisons, or broader strategic guidance.
+Analyze the following user question and classify it into one of these three categories:
 
-    Respond ONLY with the category keyword (e.g., 'Regulatory_Factual' or 'Strategic_Analytical'). Do not include any other text or explanation.
+- 'Regulatory_Factual': Questions asking for specific standards, regulations, definitions, compliance requirements, or direct factual information from official documents
+- 'Strategic_Analytical': Questions asking for advice, analysis, strategic guidance, comparisons, implementation strategies, or broader operational insights  
+- 'General_Inquiry': Questions about general topics not specifically related to regulations or strategy, follow-up questions seeking clarification, or conversational questions
 
-    Question: {question}
-    Category:
-    """
+Respond ONLY with the category keyword. Do not include any other text.
+
+Question: {question}
+Category:
+"""
 
     def __init__(self, config: Optional[RAGConfig] = None):
         """Initialize the enhanced RAG system with comprehensive error handling and monitoring."""
         self.config = config or RAGConfig()
         self.metrics_history: List[QueryMetrics] = []
         self._classification_cache: Dict[str, str] = {}
+        self.conversation_memory = ConversationMemory()
         
         logger.info("Initializing Enhanced RAG System...")
         
@@ -417,18 +461,25 @@ You are a highly experienced and professional consultant specializing in the ope
             logger.error(f"Classification failed: {e}. Using default.")
             return QuestionCategory.STRATEGIC_ANALYTICAL.value
 
-    def _get_llm_routing(self, question_category: str) -> Tuple[Any, str, Any, str]:
-        """Determine LLM routing based on question category."""
-        if question_category == QuestionCategory.REGULATORY_FACTUAL.value:
-            return (
-                self.gemini_llm, LLMProvider.GEMINI.value,
-                self.openai_llm, LLMProvider.OPENAI.value
-            )
-        else:
-            return (
-                self.openai_llm, LLMProvider.OPENAI.value,
-                self.gemini_llm, LLMProvider.GEMINI.value
-            )
+def _get_llm_routing(self, question_category: str) -> Tuple[Any, str, Any, str]:
+    """
+    Enhanced LLM routing based on question category.
+    
+    Routing Strategy:
+    - Regulatory_Factual: Gemini (precise, factual) -> OpenAI (fallback)
+    - Strategic_Analytical: OpenAI (creative, analytical) -> Gemini (fallback)  
+    - General_Inquiry: OpenAI (conversational) -> Gemini (fallback)
+    """
+    if question_category == QuestionCategory.REGULATORY_FACTUAL.value:
+        return (
+            self.gemini_llm, LLMProvider.GEMINI.value,
+            self.openai_llm, LLMProvider.OPENAI.value
+        )
+    else:  # Both Strategic_Analytical and General_Inquiry use OpenAI as primary
+        return (
+            self.openai_llm, LLMProvider.OPENAI.value,
+            self.gemini_llm, LLMProvider.GEMINI.value
+        )
 
     def _invoke_llm(self, llm, prompt: str, image_bytes: Optional[bytes] = None) -> Optional[str]:
         """Invoke LLM with proper error handling and multimodal support."""
@@ -455,17 +506,20 @@ You are a highly experienced and professional consultant specializing in the ope
             logger.error(f"LLM invocation failed: {e}")
             return None
 
-    def _is_substantive_response(self, response: str) -> bool:
-        """Check if response is substantive and useful."""
-        if not response or len(response) < self.config.min_substantive_length:
-            return False
-        
-        non_substantive_indicators = [
-            "cannot answer this question",
-            "don't have enough information",
-            "unable to provide",
-            "insufficient context"
-        ]
+def _is_substantive_response(self, response: str) -> bool:
+    """Enhanced check for substantive and useful responses."""
+    if not response or len(response) < self.config.min_substantive_length:
+        return False
+    
+    # Updated non-substantive indicators
+    non_substantive_indicators = [
+        "cannot answer this question",
+        "don't have enough information", 
+        "unable to provide",
+        "insufficient context",
+        "i don't know",
+        "not available in the context",
+        "cannot be determine
         
         return not any(indicator in response.lower() for indicator in non_substantive_indicators)
 
