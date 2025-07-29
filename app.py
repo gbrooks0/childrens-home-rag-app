@@ -230,72 +230,184 @@ with mode_tab1:
         user_question = st.text_area(
             "Describe your situation or question:",
             value=st.session_state.current_question,
-            placeholder="Start typing your question... (e.g., 'How do we prepare for...')  |  Press Ctrl+Enter to submit",
+            placeholder="Start typing your question... (e.g., 'How do we prepare for...')  |  Press Cmd/Ctrl+Enter to submit",
             height=120,
             key="question_input"
         )
         
-        # ENHANCED FEATURE: Robust Ctrl+Enter functionality
+        # ENHANCED FEATURE: FIXED Ctrl+Enter functionality
         st.components.v1.html("""
         <script>
         function setupKeyboardShortcut() {
-            // Find the textarea by looking for the specific placeholder text
+            console.log('Setting up keyboard shortcut...');
+            
+            // Find the textarea more reliably
             const textAreas = document.querySelectorAll('textarea');
             let targetTextArea = null;
             
+            // Look for textarea with the specific placeholder or by position
             for (let textarea of textAreas) {
-                if (textarea.placeholder && textarea.placeholder.includes('Start typing your question')) {
+                if (textarea.placeholder && 
+                    (textarea.placeholder.includes('Start typing your question') || 
+                     textarea.placeholder.includes('Cmd/Ctrl+Enter to submit'))) {
                     targetTextArea = textarea;
                     break;
                 }
             }
             
-            if (targetTextArea && !targetTextArea.hasCtrlEnterListener) {
-                targetTextArea.hasCtrlEnterListener = true;
+            // Fallback: get the first visible textarea
+            if (!targetTextArea && textAreas.length > 0) {
+                targetTextArea = textAreas[0];
+            }
+            
+            if (targetTextArea) {
+                // Remove existing listener to avoid duplicates
+                targetTextArea.removeEventListener('keydown', handleKeyDown);
                 
-                targetTextArea.addEventListener('keydown', function(e) {
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        
-                        // Find and click the Get Expert Guidance button
-                        const buttons = document.querySelectorAll('button');
-                        for (let button of buttons) {
-                            const buttonText = button.textContent || button.innerText;
-                            if (buttonText.includes('Get Expert Guidance')) {
-                                console.log('Keyboard shortcut triggered - clicking button');
-                                button.click();
-                                return;
-                            }
-                        }
-                        
-                        // Alternative: try finding by button attributes
-                        const primaryButtons = document.querySelectorAll('button[kind="primary"]');
-                        if (primaryButtons.length > 0) {
-                            console.log('Fallback: clicking primary button');
-                            primaryButtons[0].click();
-                        }
-                    }
-                });
+                // Add the new listener
+                targetTextArea.addEventListener('keydown', handleKeyDown);
+                console.log('Keyboard listener attached to textarea');
                 
-                console.log('Ctrl+Enter listener added successfully');
+                // Also add to the parent form if it exists
+                const form = targetTextArea.closest('form');
+                if (form) {
+                    form.removeEventListener('keydown', handleKeyDown);
+                    form.addEventListener('keydown', handleKeyDown);
+                    console.log('Keyboard listener also attached to form');
+                }
+            } else {
+                console.log('No suitable textarea found');
             }
         }
-        
-        // Try multiple times to ensure it works across Streamlit reruns
+
+        function handleKeyDown(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                console.log('Cmd/Ctrl+Enter detected!', {
+                    metaKey: e.metaKey,
+                    ctrlKey: e.ctrlKey,
+                    key: e.key
+                });
+                
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Find the submit button more reliably
+                let submitButton = null;
+                
+                // Method 1: Look for button with specific text
+                const buttons = document.querySelectorAll('button');
+                for (let button of buttons) {
+                    const buttonText = (button.textContent || button.innerText || '').trim();
+                    if (buttonText.includes('Get Expert Guidance') || 
+                        buttonText.includes('Expert Guidance') ||
+                        buttonText.includes('🧠')) {
+                        submitButton = button;
+                        console.log('Found button by text:', buttonText);
+                        break;
+                    }
+                }
+                
+                // Method 2: Look for button with primary type
+                if (!submitButton) {
+                    const primaryButtons = document.querySelectorAll('button[kind="primary"]');
+                    if (primaryButtons.length > 0) {
+                        submitButton = primaryButtons[0];
+                        console.log('Found primary button');
+                    }
+                }
+                
+                // Method 3: Look for button with data-testid (Streamlit often uses this)
+                if (!submitButton) {
+                    const testButtons = document.querySelectorAll('button[data-testid*="guidance"]');
+                    if (testButtons.length > 0) {
+                        submitButton = testButtons[0];
+                        console.log('Found button by test ID');
+                    }
+                }
+                
+                // Method 4: Look for any button in the same container as the textarea
+                if (!submitButton) {
+                    const container = e.target.closest('.stTextArea')?.parentElement || 
+                                    e.target.closest('div');
+                    if (container) {
+                        const containerButtons = container.querySelectorAll('button');
+                        for (let button of containerButtons) {
+                            if (button.offsetParent !== null) { // Button is visible
+                                submitButton = button;
+                                console.log('Found button in same container');
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (submitButton && !submitButton.disabled) {
+                    console.log('Clicking submit button');
+                    submitButton.click();
+                    
+                    // Visual feedback
+                    submitButton.style.transform = 'scale(0.95)';
+                    setTimeout(() => {
+                        if (submitButton) {
+                            submitButton.style.transform = '';
+                        }
+                    }, 150);
+                } else {
+                    console.log('Submit button not found or disabled');
+                    
+                    // Alternative: trigger a custom event
+                    const customEvent = new CustomEvent('streamlit-submit', {
+                        bubbles: true,
+                        detail: { source: 'keyboard-shortcut' }
+                    });
+                    e.target.dispatchEvent(customEvent);
+                }
+            }
+        }
+
+        // Initialize immediately
+        setupKeyboardShortcut();
+
+        // Set up multiple fallbacks for Streamlit's dynamic rendering
         setTimeout(setupKeyboardShortcut, 100);
         setTimeout(setupKeyboardShortcut, 500);
         setTimeout(setupKeyboardShortcut, 1000);
-        
-        // Set up observer for when Streamlit reruns the page
+        setTimeout(setupKeyboardShortcut, 2000);
+
+        // Watch for DOM changes (when Streamlit reruns)
         const observer = new MutationObserver(function(mutations) {
-            setupKeyboardShortcut();
+            let shouldSetup = false;
+            
+            mutations.forEach(function(mutation) {
+                if (mutation.type === 'childList') {
+                    // Check if new textareas or buttons were added
+                    const addedNodes = Array.from(mutation.addedNodes);
+                    const hasRelevantChanges = addedNodes.some(node => 
+                        node.nodeType === 1 && (
+                            node.querySelector && (
+                                node.querySelector('textarea') || 
+                                node.querySelector('button')
+                            )
+                        )
+                    );
+                    
+                    if (hasRelevantChanges) {
+                        shouldSetup = true;
+                    }
+                }
+            });
+            
+            if (shouldSetup) {
+                setTimeout(setupKeyboardShortcut, 100);
+            }
         });
-        
+
         observer.observe(document.body, {
             childList: true,
             subtree: true
         });
+
+        console.log('Keyboard shortcut system initialized');
         </script>
         """, height=0)
         
