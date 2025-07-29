@@ -1,4 +1,4 @@
-# app.py - Comprehensive Children's Home Management System
+# app.py - Fixed Version with Correct Function Order
 
 import streamlit as st
 import os
@@ -11,6 +11,23 @@ try:
     COMPLIANCE_FEATURES_AVAILABLE = True
 except ImportError:
     COMPLIANCE_FEATURES_AVAILABLE = False
+
+# DEFINE FUNCTIONS FIRST (before they're called)
+def get_placeholder_text(category):
+    """Get appropriate placeholder text based on selected category."""
+    placeholders = {
+        "🎯 Strategic Planning & Development": "e.g., We're looking to expand from 6 to 12 bed capacity over the next 2 years. What strategic considerations should we factor in, and how do we ensure we maintain quality while growing?",
+        "💼 Operations & Management": "e.g., We're struggling with staff retention and high turnover is affecting continuity of care. What operational strategies can we implement to improve staff satisfaction and reduce turnover?",
+        "📋 Compliance & Regulatory": "e.g., We have an Ofsted inspection coming up in 3 months. We're currently rated 'Good' but want to achieve 'Outstanding'. What specific areas should we focus on and how do we demonstrate our improvements?",
+        "👤 Child-Centered Care & Support": "e.g., We have a 14-year-old resident with complex trauma who is struggling with emotional regulation and school attendance. What therapeutic approaches and support strategies would be most effective?",
+        "👥 Staff Management & Development": "e.g., We want to develop a comprehensive training program for new residential care workers. What should be included, and how do we balance theoretical knowledge with practical skills development?",
+        "💰 Financial Management & Planning": "e.g., We're developing our budget for next year and placement fees haven't increased in line with our rising costs. How do we maintain financial sustainability while ensuring quality of care?",
+        "🏢 Facilities & Environment": "e.g., We're renovating our communal areas and want to create spaces that feel homely but also meet all safety and regulatory requirements. What design principles should guide our approach?",
+        "📊 Quality Assurance & Improvement": "e.g., We want to implement a robust quality assurance system that goes beyond minimum compliance. What metrics should we track and how do we create a culture of continuous improvement?",
+        "🤝 Stakeholder Relations & Communication": "e.g., We're having challenges with communication between our home, local authority commissioners, and social workers. How can we improve collaboration and ensure everyone is aligned on care goals?"
+    }
+    
+    return placeholders.get(category, "e.g., Describe your situation, challenge, or question about running your children's home. Include relevant context such as current circumstances, specific challenges you're facing, and what outcomes you're hoping to achieve.")
 
 # Page configuration
 st.set_page_config(
@@ -321,7 +338,7 @@ if analysis_mode == "💼 Strategic & Operational Guidance":
             st.warning("⚠️ Please describe your situation or question to receive expert guidance")
 
 elif analysis_mode == "🔍 Visual Compliance Analysis":
-    # Image Analysis Interface (existing code from previous version)
+    # Image Analysis Interface
     if not COMPLIANCE_FEATURES_AVAILABLE:
         st.error("❌ Visual compliance analysis features are currently being upgraded.")
         st.info("💡 Use Strategic & Operational Guidance mode for comprehensive support, or contact your administrator for visual analysis access.")
@@ -332,9 +349,6 @@ elif analysis_mode == "🔍 Visual Compliance Analysis":
         # Initialize compliance analyzer
         if 'compliance_analyzer' not in st.session_state:
             st.session_state.compliance_analyzer = ComplianceAnalyzer(st.session_state.rag_system)
-        
-        # Rest of image analysis code here...
-        # [Previous image analysis interface code]
         
         uploaded_image = st.file_uploader(
             "Upload facility image",
@@ -379,31 +393,46 @@ elif analysis_mode == "🔍 Visual Compliance Analysis":
                         
                         result = st.session_state.compliance_analyzer.analyze_image_compliance(question, image_bytes)
                         
-                        # Display results (existing code)
+                        # Display results
                         st.markdown("---")
                         st.subheader("📊 Comprehensive Facility Analysis")
-                        # [Rest of analysis display code]
+                        
+                        # Key metrics
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric("Overall Assessment", f"{result.overall_compliance_score}%")
+                        
+                        with col2:
+                            st.metric("Areas Reviewed", len(result.category_distribution))
+                        
+                        with col3:
+                            st.metric("Findings", result.total_issues)
+                        
+                        with col4:
+                            critical_count = result.risk_distribution.get("CRITICAL", 0)
+                            st.metric("Priority Items", critical_count)
+                        
+                        # Results sections
+                        if result.priority_actions:
+                            st.subheader("🎯 Priority Actions")
+                            for i, action in enumerate(result.priority_actions, 1):
+                                st.write(f"{i}. {action}")
+                        
+                        if result.positive_observations:
+                            st.subheader("✅ Positive Observations")
+                            for observation in result.positive_observations:
+                                st.success(f"• {observation}")
+                        
+                        if result.recommendations:
+                            st.subheader("💡 Strategic Recommendations")
+                            for rec in result.recommendations:
+                                st.write(f"• {rec}")
                         
                     except Exception as e:
                         st.error(f"❌ Analysis failed: {e}")
         else:
             st.info("👆 Upload a facility image to begin comprehensive analysis")
-
-def get_placeholder_text(category):
-    """Get appropriate placeholder text based on selected category."""
-    placeholders = {
-        "🎯 Strategic Planning & Development": "e.g., We're looking to expand from 6 to 12 bed capacity over the next 2 years. What strategic considerations should we factor in, and how do we ensure we maintain quality while growing?",
-        "💼 Operations & Management": "e.g., We're struggling with staff retention and high turnover is affecting continuity of care. What operational strategies can we implement to improve staff satisfaction and reduce turnover?",
-        "📋 Compliance & Regulatory": "e.g., We have an Ofsted inspection coming up in 3 months. We're currently rated 'Good' but want to achieve 'Outstanding'. What specific areas should we focus on and how do we demonstrate our improvements?",
-        "👤 Child-Centered Care & Support": "e.g., We have a 14-year-old resident with complex trauma who is struggling with emotional regulation and school attendance. What therapeutic approaches and support strategies would be most effective?",
-        "👥 Staff Management & Development": "e.g., We want to develop a comprehensive training program for new residential care workers. What should be included, and how do we balance theoretical knowledge with practical skills development?",
-        "💰 Financial Management & Planning": "e.g., We're developing our budget for next year and placement fees haven't increased in line with our rising costs. How do we maintain financial sustainability while ensuring quality of care?",
-        "🏢 Facilities & Environment": "e.g., We're renovating our communal areas and want to create spaces that feel homely but also meet all safety and regulatory requirements. What design principles should guide our approach?",
-        "📊 Quality Assurance & Improvement": "e.g., We want to implement a robust quality assurance system that goes beyond minimum compliance. What metrics should we track and how do we create a culture of continuous improvement?",
-        "🤝 Stakeholder Relations & Communication": "e.g., We're having challenges with communication between our home, local authority commissioners, and social workers. How can we improve collaboration and ensure everyone is aligned on care goals?"
-    }
-    
-    return placeholders.get(category, "e.g., Describe your situation, challenge, or question about running your children's home. Include relevant context such as current circumstances, specific challenges you're facing, and what outcomes you're hoping to achieve.")
 
 # Footer
 st.markdown("---")
