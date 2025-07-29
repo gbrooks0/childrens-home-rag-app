@@ -155,13 +155,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Clean header (Suggestion 1)
+# Clean header - HIGHEST POSSIBLE POSITION
 st.markdown('<div class="main-header">', unsafe_allow_html=True)
 st.title("🏠 Children's Home Management System")
 st.markdown("*Strategic, operational & compliance guidance for residential care*")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Clean tab interface (Suggestion 15)
+# Clean tab interface immediately after title
 st.markdown('<div class="tab-container">', unsafe_allow_html=True)
 mode_tab1, mode_tab2 = st.tabs(["💬 Ask Questions", "📷 Analyze Images"])
 st.markdown('</div>', unsafe_allow_html=True)
