@@ -129,11 +129,11 @@ def performance_timer():
 
 class ConversationMemory:
     """Simple conversation memory for better follow-up handling."""
-    
+
     def __init__(self, max_history: int = 5):
         self.max_history = max_history
         self.conversation_history: List[Dict[str, str]] = []
-    
+
     def add_exchange(self, question: str, answer: str, category: str):
         """Add a question-answer exchange to memory."""
         self.conversation_history.append({
@@ -142,31 +142,38 @@ class ConversationMemory:
             "category": category,
             "timestamp": time.time()
         })
-        
+
         # Keep only recent exchanges
         if len(self.conversation_history) > self.max_history:
             self.conversation_history = self.conversation_history[-self.max_history:]
-    
+
     def get_context_for_followup(self) -> str:
         """Get conversation context for follow-up questions."""
         if not self.conversation_history:
             return ""
-        
+
         context_parts = []
-        for exchange in self.conversation_history[-3:]:  # Last 3 exchanges
-            context_parts.append(f"Previous Q: {exchange['question']}")
-            context_parts.append(f"Previous A: {exchange['answer'][:200]}...")
-        
+        for i, exchange in enumerate(self.conversation_history[-3:], 1):  # Last 3 exchanges
+            context_parts.append(f"Q{i}: {exchange['question']}")
+            # Include more of the answer for better context
+            answer_preview = exchange['answer'][:500] + "..." if len(exchange['answer']) > 500 else exchange['answer']
+            context_parts.append(f"A{i}: {answer_preview}")
+            context_parts.append("")  # Empty line for readability
+
         return "\n".join(context_parts)
+
+    def clear_history(self):
+        """Clear conversation history."""
+        self.conversation_history = []
 
 class EnhancedRAGSystem:
     """
     Enhanced RAG System with improved error handling, performance monitoring,
     caching, and enterprise-level features.
     """
-    
+
     # Advanced prompt templates
-ADVANCED_PROMPT_TEMPLATE = """---
+    ADVANCED_PROMPT_TEMPLATE = """---
 **ROLE AND GOAL**
 You are a highly knowledgeable assistant with specialized expertise in children's homes operations, strategic planning, Ofsted regulations, and care sector best practices. While your primary specialization is in children's homes, you are also capable of providing helpful, accurate responses on a wide variety of topics using the available context.
 
@@ -184,7 +191,7 @@ You are a highly knowledgeable assistant with specialized expertise in children'
 
 4.  **Anticipate Follow-up Needs:** Structure your response to naturally invite follow-up questions. When appropriate, mention related topics or areas that might warrant further exploration, and suggest specific follow-up questions the user might want to ask.
 
-5.  **Flexible Context Handling:** 
+5.  **Flexible Context Handling:**
    - If the context fully addresses the question, provide a comprehensive answer
    - If the context partially addresses the question, provide what you can and clearly indicate what additional information would be helpful
    - If the context doesn't contain relevant information, acknowledge this and suggest how the question might be refined or what type of context would be needed
@@ -209,7 +216,7 @@ You are a highly knowledgeable assistant with specialized expertise in children'
 Analyze the following user question and classify it into one of these three categories:
 
 - 'Regulatory_Factual': Questions asking for specific standards, regulations, definitions, compliance requirements, or direct factual information from official documents
-- 'Strategic_Analytical': Questions asking for advice, analysis, strategic guidance, comparisons, implementation strategies, or broader operational insights  
+- 'Strategic_Analytical': Questions asking for advice, analysis, strategic guidance, comparisons, implementation strategies, or broader operational insights
 - 'General_Inquiry': Questions about general topics not specifically related to regulations or strategy, follow-up questions seeking clarification, or conversational questions
 
 Respond ONLY with the category keyword. Do not include any other text.
@@ -224,25 +231,25 @@ Category:
         self.metrics_history: List[QueryMetrics] = []
         self._classification_cache: Dict[str, str] = {}
         self.conversation_memory = ConversationMemory()
-        
+
         logger.info("Initializing Enhanced RAG System...")
-        
+
         # Initialize models with proper error handling
         self._initialize_models()
-        
+
         # Load FAISS index with validation
         self._load_faiss_index()
-        
+
         # Initialize session state
         self.session_retriever = None
         self._session_file_hash = None
-        
+
         logger.info("Enhanced RAG System initialization complete.")
 
     def _initialize_models(self) -> None:
         """Initialize LLM models with comprehensive error handling."""
         logger.info("Initializing AI models...")
-        
+
         # Configure Google API
         gemini_api_key = os.environ.get("GOOGLE_API_KEY")
         if gemini_api_key:
@@ -254,7 +261,7 @@ Category:
         # Initialize Gemini models
         self.gemini_llm = None
         self.gemini_embeddings = None
-        
+
         if gemini_api_key:
             try:
                 self.gemini_llm = ChatGoogleGenerativeAI(
@@ -274,7 +281,7 @@ Category:
         # Initialize OpenAI models
         self.openai_llm = None
         self.openai_embeddings = None
-        
+
         openai_api_key = os.environ.get("OPENAI_API_KEY")
         if openai_api_key:
             try:
@@ -313,28 +320,28 @@ Category:
     def _load_faiss_index(self) -> None:
         """Load FAISS index with retry logic and validation."""
         db_path = Path(self.config.faiss_index_path)
-        
+
         if not db_path.exists():
             error_msg = f"FAISS index not found at '{db_path}'. Please run ingest.py to create it."
             logger.error(error_msg)
             raise IndexLoadError(error_msg)
-        
+
         logger.info(f"Loading FAISS index from '{db_path}'...")
-        
+
         try:
             db = FAISS.load_local(
-                str(db_path), 
-                self.embeddings, 
+                str(db_path),
+                self.embeddings,
                 allow_dangerous_deserialization=True
             )
-            
+
             self.main_retriever = db.as_retriever(
                 search_type="similarity",
                 search_kwargs={'k': self.config.main_retriever_k}
             )
-            
+
             logger.info("FAISS index loaded successfully.")
-            
+
         except Exception as e:
             error_msg = f"Failed to load FAISS index: {e}"
             logger.error(error_msg)
@@ -359,33 +366,33 @@ Category:
     def process_uploaded_file(self, uploaded_file_bytes: bytes) -> Dict[str, Any]:
         """
         Process uploaded file with caching and enhanced error handling.
-        
+
         Returns:
             Dict containing processing results and metadata
         """
         file_hash = self._calculate_file_hash(uploaded_file_bytes)
-        
+
         # Check if file is already processed
         if self._session_file_hash == file_hash:
             logger.info("File already processed (same hash), skipping reprocessing.")
             return {"status": "cached", "hash": file_hash}
-        
+
         logger.info("Processing new uploaded file...")
-        
+
         with performance_timer() as get_time:
             try:
                 # Create temporary file
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                     tmp_file.write(uploaded_file_bytes)
                     tmp_file_path = tmp_file.name
-                
+
                 logger.debug(f"Created temporary file: {tmp_file_path}")
-                
+
                 # Load and process document
                 loader = PyPDFium2Loader(tmp_file_path)
                 docs = loader.load()
                 logger.info(f"Loaded {len(docs)} pages from uploaded file.")
-                
+
                 # Split into chunks
                 text_splitter = RecursiveCharacterTextSplitter(
                     chunk_size=self.config.chunk_size,
@@ -393,19 +400,19 @@ Category:
                 )
                 chunks = text_splitter.split_documents(docs)
                 logger.info(f"Split document into {len(chunks)} chunks.")
-                
+
                 # Create vector store
                 temp_db = Chroma.from_documents(chunks, self.embeddings)
                 self.session_retriever = temp_db.as_retriever(
                     search_kwargs={"k": self.config.session_retriever_k}
                 )
-                
+
                 # Update cache
                 self._session_file_hash = file_hash
-                
+
                 processing_time = get_time()
                 logger.info(f"File processed successfully in {processing_time:.2f}ms")
-                
+
                 return {
                     "status": "processed",
                     "hash": file_hash,
@@ -413,11 +420,11 @@ Category:
                     "chunks": len(chunks),
                     "processing_time_ms": processing_time
                 }
-                
+
             except Exception as e:
                 logger.error(f"Failed to process uploaded file: {e}")
                 raise RAGSystemError(f"File processing failed: {e}")
-                
+
             finally:
                 # Cleanup temporary file
                 if 'tmp_file_path' in locals() and os.path.exists(tmp_file_path):
@@ -429,6 +436,11 @@ Category:
         self.session_retriever = None
         self._session_file_hash = None
         logger.info("Session data cleared.")
+
+    def clear_conversation_memory(self) -> None:
+        """Clear conversation memory - useful for starting fresh topics."""
+        self.conversation_memory.clear_history()
+        logger.info("Conversation memory cleared.")
 
     @lru_cache(maxsize=128)
     def _classify_question_cached(self, question: str) -> str:
@@ -442,50 +454,50 @@ Category:
             return QuestionCategory.STRATEGIC_ANALYTICAL.value
 
         classification_prompt = self.CLASSIFICATION_PROMPT.format(question=question)
-        
+
         try:
             with performance_timer() as get_time:
                 response = self.gemini_llm.invoke(classification_prompt)
                 classification_time = get_time()
-            
+
             category = response.content.strip()
             logger.debug(f"Question classified as '{category}' in {classification_time:.2f}ms")
-            
+
             if category in [cat.value for cat in QuestionCategory]:
                 return category
             else:
                 logger.warning(f"Unexpected classification: '{category}'. Using default.")
                 return QuestionCategory.STRATEGIC_ANALYTICAL.value
-                
+
         except Exception as e:
             logger.error(f"Classification failed: {e}. Using default.")
             return QuestionCategory.STRATEGIC_ANALYTICAL.value
 
-def _get_llm_routing(self, question_category: str) -> Tuple[Any, str, Any, str]:
-    """
-    Enhanced LLM routing based on question category.
-    
-    Routing Strategy:
-    - Regulatory_Factual: Gemini (precise, factual) -> OpenAI (fallback)
-    - Strategic_Analytical: OpenAI (creative, analytical) -> Gemini (fallback)  
-    - General_Inquiry: OpenAI (conversational) -> Gemini (fallback)
-    """
-    if question_category == QuestionCategory.REGULATORY_FACTUAL.value:
-        return (
-            self.gemini_llm, LLMProvider.GEMINI.value,
-            self.openai_llm, LLMProvider.OPENAI.value
-        )
-    else:  # Both Strategic_Analytical and General_Inquiry use OpenAI as primary
-        return (
-            self.openai_llm, LLMProvider.OPENAI.value,
-            self.gemini_llm, LLMProvider.GEMINI.value
-        )
+    def _get_llm_routing(self, question_category: str) -> Tuple[Any, str, Any, str]:
+        """
+        Enhanced LLM routing based on question category.
+
+        Routing Strategy:
+        - Regulatory_Factual: Gemini (precise, factual) -> OpenAI (fallback)
+        - Strategic_Analytical: OpenAI (creative, analytical) -> Gemini (fallback)
+        - General_Inquiry: OpenAI (conversational) -> Gemini (fallback)
+        """
+        if question_category == QuestionCategory.REGULATORY_FACTUAL.value:
+            return (
+                self.gemini_llm, LLMProvider.GEMINI.value,
+                self.openai_llm, LLMProvider.OPENAI.value
+            )
+        else:  # Both Strategic_Analytical and General_Inquiry use OpenAI as primary
+            return (
+                self.openai_llm, LLMProvider.OPENAI.value,
+                self.gemini_llm, LLMProvider.GEMINI.value
+            )
 
     def _invoke_llm(self, llm, prompt: str, image_bytes: Optional[bytes] = None) -> Optional[str]:
         """Invoke LLM with proper error handling and multimodal support."""
         if not llm:
             return None
-            
+
         try:
             if image_bytes:
                 logger.debug("Preparing multimodal query with image")
@@ -499,87 +511,141 @@ def _get_llm_routing(self, question_category: str) -> Tuple[Any, str, Any, str]:
                 response = llm.invoke([message])
             else:
                 response = llm.invoke(prompt)
-            
+
             return response.content if response else None
-            
+
         except Exception as e:
             logger.error(f"LLM invocation failed: {e}")
             return None
 
-def _is_substantive_response(self, response: str) -> bool:
-    """Enhanced check for substantive and useful responses."""
-    if not response or len(response) < self.config.min_substantive_length:
-        return False
-    
-    # Updated non-substantive indicators
-    non_substantive_indicators = [
-        "cannot answer this question",
-        "don't have enough information", 
-        "unable to provide",
-        "insufficient context",
-        "i don't know",
-        "not available in the context",
-        "cannot be determine
-        
-        return not any(indicator in response.lower() for indicator in non_substantive_indicators)
+    def _is_substantive_response(self, response: str) -> bool:
+        """Enhanced check for substantive and useful responses."""
+        if not response or len(response) < self.config.min_substantive_length:
+            return False
 
-    def query(self, user_question: str, context_text: str, source_docs: List, 
+        # Updated non-substantive indicators
+        non_substantive_indicators = [
+            "cannot answer this question",
+            "don't have enough information",
+            "unable to provide",
+            "insufficient context",
+            "i don't know",
+            "not available in the context",
+            "cannot be determined from"
+        ]
+
+        response_lower = response.lower()
+
+        # Check for non-substantive patterns
+        non_substantive_count = sum(1 for indicator in non_substantive_indicators
+                                    if indicator in response_lower)
+
+        # If multiple non-substantive indicators, likely not substantive
+        if non_substantive_count >= 2:
+            return False
+
+        # Check for substantive content indicators
+        substantive_indicators = [
+            "based on the context",
+            "according to",
+            "the document states",
+            "key points include",
+            "recommendations",
+            "requirements include",
+            "standards specify"
+        ]
+
+        has_substantive_content = any(indicator in response_lower
+                                      for indicator in substantive_indicators)
+
+        # Must have substantive content OR be reasonably long without many non-substantive indicators
+        return has_substantive_content or (len(response) > 200 and non_substantive_count == 0)
+
+    def query(self, user_question: str, context_text: str, source_docs: List,
              image_bytes: Optional[bytes] = None) -> Dict[str, Any]:
         """
-        Enhanced query method with comprehensive monitoring and fallback logic.
+        Enhanced query method with conversation memory and follow-up support.
         """
         logger.info(f"Processing query: {user_question[:100]}...")
-        
+
         with performance_timer() as get_total_time:
             # Classify question
             question_category = self._classify_question_cached(user_question)
-            
-            # Prepare prompt
+
+            # Enhanced context building for follow-ups
+            enhanced_context = context_text
+
+            # For follow-up questions or when context seems insufficient, include conversation history
+            should_include_history = (
+                question_category == QuestionCategory.GENERAL_INQUIRY.value or
+                len(context_text.strip()) < 200 or  # Very little context found
+                any(word in user_question.lower() for word in [
+                    'this', 'that', 'it', 'why', 'how', 'which version', 'compare',
+                    'difference', 'better', 'worse', 'mentioned', 'above', 'previous'
+                ])
+            )
+
+            if should_include_history:
+                conversation_context = self.conversation_memory.get_context_for_followup()
+                if conversation_context:
+                    enhanced_context = f"""CURRENT CONTEXT:
+{context_text}
+
+RECENT CONVERSATION CONTEXT:
+{conversation_context}
+
+Note: Use both current context and recent conversation to answer the question comprehensively."""
+                    logger.debug("Enhanced context with conversation history for follow-up question")
+
+            # Prepare prompt with enhanced context
             full_prompt = self.ADVANCED_PROMPT_TEMPLATE.format(
-                context=context_text,
+                context=enhanced_context,
                 question=user_question
             )
-            
+
             # Determine LLM routing
             primary_llm, primary_name, fallback_llm, fallback_name = self._get_llm_routing(question_category)
-            
+
             response = None
             used_llm = "None"
             fallback_used = False
-            
+
             # Try primary LLM
             if primary_llm:
                 logger.debug(f"Attempting query with primary LLM: {primary_name}")
                 with performance_timer() as get_primary_time:
                     response = self._invoke_llm(primary_llm, full_prompt, image_bytes)
                     primary_time = get_primary_time()
-                
+
                 if response and self._is_substantive_response(response):
                     used_llm = primary_name
                     logger.info(f"Primary LLM ({primary_name}) provided substantive response in {primary_time:.2f}ms")
                 else:
                     logger.warning(f"Primary LLM ({primary_name}) response was not substantive")
                     response = None
-            
+
             # Try fallback LLM if needed
             if not response and fallback_llm:
                 logger.debug(f"Attempting query with fallback LLM: {fallback_name}")
                 fallback_used = True
-                
+
                 with performance_timer() as get_fallback_time:
                     response = self._invoke_llm(fallback_llm, full_prompt, image_bytes)
                     fallback_time = get_fallback_time()
-                
+
                 if response and self._is_substantive_response(response):
                     used_llm = fallback_name
                     logger.info(f"Fallback LLM ({fallback_name}) provided response in {fallback_time:.2f}ms")
                 else:
                     logger.warning(f"Fallback LLM ({fallback_name}) also failed to provide substantive response")
-            
+
             # Prepare final response
-            final_answer = response or "Based on the provided context, I cannot answer this question using the available models."
+            final_answer = response or "I don't have enough context to answer this question. Could you provide more details or rephrase your question?"
             total_time = get_total_time()
-            
+
+            # Add to conversation memory BEFORE returning
+            self.conversation_memory.add_exchange(user_question, final_answer, question_category)
+
             # Record metrics
             metrics = QueryMetrics(
                 question_category=question_category,
@@ -591,9 +657,9 @@ def _is_substantive_response(self, response: str) -> bool:
                 timestamp=time.time()
             )
             self.metrics_history.append(metrics)
-            
+
             logger.info(f"Query completed in {total_time:.2f}ms using {used_llm}")
-            
+
             return {
                 "answer": final_answer,
                 "source_documents": source_docs,
@@ -602,9 +668,56 @@ def _is_substantive_response(self, response: str) -> bool:
                     "question_category": question_category,
                     "response_time_ms": total_time,
                     "fallback_used": fallback_used,
-                    "context_chunks": len(source_docs)
+                    "context_chunks": len(source_docs),
+                    "enhanced_context_used": should_include_history,
+                    "follow_up_suggestions": self._generate_followup_suggestions(final_answer, question_category)
                 }
             }
+
+    def _generate_followup_suggestions(self, answer: str, category: str) -> List[str]:
+        """Generate contextual follow-up question suggestions."""
+        suggestions = []
+
+        if category == QuestionCategory.REGULATORY_FACTUAL.value:
+            suggestions = [
+                "Can you explain the practical implementation of this requirement?",
+                "What are the common compliance challenges with this standard?",
+                "Are there any related standards I should be aware of?",
+                "What documentation is typically required for this?"
+            ]
+        elif category == QuestionCategory.STRATEGIC_ANALYTICAL.value:
+            suggestions = [
+                "What would be the first steps to implement this recommendation?",
+                "How can we measure success for this approach?",
+                "What are the potential risks or challenges?",
+                "How does this compare to industry best practices?"
+            ]
+        else:  # General_Inquiry
+            suggestions = [
+                "Can you provide more details about this?",
+                "Are there any examples or case studies?",
+                "What should I consider next?",
+                "How does this relate to our overall strategy?"
+            ]
+
+        return suggestions[:3]  # Return top 3 suggestions
+
+    def get_conversation_history(self) -> List[Dict[str, Any]]:
+        """Get the full conversation history."""
+        return self.conversation_memory.conversation_history
+
+    def get_conversation_summary(self) -> Dict[str, Any]:
+        """Get a summary of the conversation."""
+        history = self.conversation_memory.conversation_history
+        if not history:
+            return {"total_questions": 0, "topics": []}
+
+        return {
+            "total_questions": len(history),
+            "latest_question": history[-1]["question"] if history else None,
+            "question_categories": [ex["category"] for ex in history],
+            "conversation_duration": time.time() - history[0]["timestamp"] if history else 0
+        }
 
     def get_system_health(self) -> Dict[str, Any]:
         """Get comprehensive system health information."""
@@ -631,12 +744,12 @@ def _is_substantive_response(self, response: str) -> bool:
     def get_performance_metrics(self, last_n: Optional[int] = None) -> Dict[str, Any]:
         """Get performance metrics for recent queries."""
         metrics = self.metrics_history[-last_n:] if last_n else self.metrics_history
-        
+
         if not metrics:
             return {"message": "No metrics available"}
-        
+
         response_times = [m.response_time_ms for m in metrics]
-        
+
         return {
             "query_count": len(metrics),
             "avg_response_time_ms": sum(response_times) / len(response_times),
