@@ -1,15 +1,5 @@
-# app.py - Fixed Version with SQLite Compatibility
+# app.py - Enhanced Clean Professional Version
 
-# CRITICAL: SQLite3 Fix MUST be first, before any other imports
-import sys
-try:
-    __import__('pysqlite3')
-    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-    print("DEBUG: pysqlite3 imported and set as default sqlite3 module.")
-except ImportError:
-    print("DEBUG: pysqlite3 not found, falling back to system sqlite3.")
-
-# Now safe to import other modules
 import streamlit as st
 import os
 import re
@@ -27,7 +17,7 @@ st.set_page_config(
     page_title="Children's Home Management System",
     page_icon="🏠",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed"  # Cleaner initial state
 )
 
 # Common question patterns for auto-complete
@@ -74,7 +64,7 @@ def get_contextual_tip(current_input=""):
     elif "budget" in current_input.lower() or "cost" in current_input.lower():
         return "💡 **Tip:** Include your home size, capacity, or specific financial challenges for relevant guidance"
     else:
-        return tips[len(current_input) % len(tips)]
+        return tips[len(current_input) % len(tips)]  # Rotate tips based on input length
 
 def get_question_suggestions(input_text):
     """Get auto-complete suggestions based on user input."""
@@ -87,7 +77,7 @@ def get_question_suggestions(input_text):
     for question in COMMON_QUESTIONS:
         if any(word in question.lower() for word in input_lower.split()):
             suggestions.append(question)
-        if len(suggestions) >= 5:
+        if len(suggestions) >= 5:  # Limit to 5 suggestions
             break
     
     return suggestions
@@ -177,7 +167,7 @@ mode_tab1, mode_tab2 = st.tabs(["💬 Ask Questions", "📷 Analyze Images"])
 st.markdown('</div>', unsafe_allow_html=True)
 
 with mode_tab1:
-    # Main question input FIRST - most important function
+    # Main question input FIRST - most important function (Suggestion 2)
     st.subheader("💬 Ask Your Question")
     
     # Initialize session state for question
@@ -189,7 +179,7 @@ with mode_tab1:
         st.session_state.current_question = st.session_state.quick_question
         delattr(st.session_state, 'quick_question')
     
-    # Question input with auto-complete
+    # Question input with auto-complete (Suggestion 8)
     user_question = st.text_area(
         "Describe your situation or question:",
         value=st.session_state.current_question,
@@ -198,7 +188,7 @@ with mode_tab1:
         key="question_input"
     )
     
-    # Auto-complete suggestions
+    # Auto-complete suggestions (Suggestion 8)
     if user_question and len(user_question) > 3:
         suggestions = get_question_suggestions(user_question)
         if suggestions:
@@ -208,13 +198,13 @@ with mode_tab1:
                     st.session_state.current_question = suggestion
                     st.rerun()
     
-    # Contextual help
+    # Contextual help (Suggestion 18)
     tip = get_contextual_tip(user_question)
     st.markdown(f'<div class="contextual-tip">{tip}</div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
-    # Quick Action Buttons - Below question input
+    # Quick Action Buttons (Suggestion 9) - Below question input
     st.subheader("🚀 Quick Actions")
     st.markdown("*Or choose from these common scenarios:*")
     
@@ -249,56 +239,9 @@ with mode_tab1:
                 st.info("📚 Document integrated for this session")
             except Exception as e:
                 st.error(f"Failed to process: {e}")
-    
-    # Get guidance button
-    if st.button("🧠 Get Expert Guidance", type="primary", use_container_width=True):
-        if user_question and user_question.strip():
-            with st.spinner("Analyzing your question and accessing knowledge base..."):
-                try:
-                    retriever = st.session_state.rag_system.get_current_retriever()
-                    docs = retriever.get_relevant_documents(user_question)
-                    context = "\n\n".join([doc.page_content for doc in docs])
-                    
-                    result = st.session_state.rag_system.query(
-                        user_question=user_question,
-                        context_text=context,
-                        source_docs=docs
-                    )
-                    
-                    # Clean results display
-                    st.markdown("---")
-                    st.subheader("🧠 Expert Guidance")
-                    st.write(result["answer"])
-                    
-                    # Simplified next steps
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("**📋 Key Actions:**")
-                        st.markdown("• Review with your management team\n• Consider implementation timeline\n• Monitor and evaluate outcomes")
-                    
-                    with col2:
-                        st.markdown("**📚 Need More Help?**")
-                        if st.button("🔄 Ask Follow-up Question"):
-                            st.session_state.current_question = ""
-                            st.rerun()
-                    
-                    # Source documents - simplified
-                    if result.get("source_documents"):
-                        with st.expander(f"📚 Sources ({len(result['source_documents'])} references)"):
-                            for i, doc in enumerate(result["source_documents"], 1):
-                                st.markdown(f"**Source {i}:**")
-                                preview = doc.page_content[:300] + "..." if len(doc.page_content) > 300 else doc.page_content
-                                st.write(preview)
-                                if i < len(result["source_documents"]):
-                                    st.markdown("---")
-                
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
-        else:
-            st.warning("⚠️ Please enter a question to receive guidance")
 
 with mode_tab2:
-    # Visual analysis high on page
+    # Visual analysis high on page (Suggestion 6)
     if not COMPLIANCE_FEATURES_AVAILABLE:
         st.error("❌ Visual analysis features are currently being upgraded.")
         st.info("💡 Use the 'Ask Questions' tab for comprehensive guidance.")
@@ -310,7 +253,7 @@ with mode_tab2:
         if 'compliance_analyzer' not in st.session_state:
             st.session_state.compliance_analyzer = ComplianceAnalyzer(st.session_state.rag_system)
         
-        # Smart image analysis prompts
+        # Smart image analysis prompts (Suggestion 16 - simplified version)
         st.markdown("**🎯 What would you like to focus on?**")
         
         analysis_focus_options = {
@@ -339,6 +282,7 @@ with mode_tab2:
             col1, col2 = st.columns([2, 1])
             
             with col1:
+                # Fixed deprecated parameter (Suggestion 7)
                 st.image(uploaded_image, caption="Image for Analysis", use_container_width=True)
             
             with col2:
@@ -365,13 +309,39 @@ with mode_tab2:
             )
             
             if st.button("🔍 Analyze Image", type="primary", use_container_width=True):
-                with st.spinner("Conducting comprehensive visual analysis..."):
-                    try:
-                        question = custom_focus if custom_focus.strip() else "Analyze this image comprehensively for compliance, quality, and child experience."
-                        image_bytes = uploaded_image.read()
-                        
-                        result = st.session_state.compliance_analyzer.analyze_image_compliance(question, image_bytes)
-                        
+                # Enhanced loading for image analysis
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                try:
+                    # Step 1: Prepare analysis
+                    status_text.text("📷 Processing uploaded image...")
+                    progress_bar.progress(25)
+                    
+                    question = custom_focus if custom_focus.strip() else "Analyze this image comprehensively for compliance, quality, and child experience."
+                    image_bytes = uploaded_image.read()
+                    
+                    # Step 2: Initialize analyzer
+                    status_text.text("🧠 Initializing compliance analysis...")
+                    progress_bar.progress(50)
+                    
+                    # Step 3: Conduct analysis
+                    status_text.text("🔍 Conducting comprehensive visual analysis...")
+                    progress_bar.progress(75)
+                    
+                    result = st.session_state.compliance_analyzer.analyze_image_compliance(question, image_bytes)
+                    
+                    # Step 4: Complete
+                    status_text.text("✅ Analysis complete!")
+                    progress_bar.progress(100)
+                    
+                    # Clear progress indicators
+                    import time
+                    time.sleep(0.5)
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    if result:
                         # Clean results display
                         st.markdown("---")
                         st.subheader("📊 Analysis Results")
@@ -409,9 +379,29 @@ with mode_tab2:
                             st.subheader("💡 Recommendations")
                             for rec in result.recommendations:
                                 st.write(f"• {rec}")
+                    else:
+                        st.error("❌ Analysis failed to produce results. Please try again with a different image.")
                         
-                    except Exception as e:
-                        st.error(f"❌ Analysis failed: {e}")
+                except Exception as e:
+                    # Clear progress indicators on error
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    st.error("❌ Image analysis failed.")
+                    
+                    # Show helpful error information  
+                    with st.expander("🔧 Error Details"):
+                        st.code(f"Error: {str(e)}")
+                        st.markdown("**💡 Try these solutions:**")
+                        st.markdown("""
+                        • **Check image format** - use JPG, PNG, or JPEG
+                        • **Ensure image is clear** and well-lit
+                        • **Try a smaller image** (under 10MB)
+                        • **Refresh the page** and try again
+                        • **Use a different image** of the same area
+                        """)
+                    
+                    st.warning(f"Debug: {str(e)}")
         else:
             st.info("👆 Upload an image to begin visual analysis")
 
