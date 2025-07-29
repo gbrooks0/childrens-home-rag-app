@@ -12,3 +12,4 @@ pysqlite3-binary
 langchain-chroma
 langchain-openai
 openai
+google-generativeai
