@@ -1,19 +1,28 @@
-# rag_system.py (Definitive, Complete, and Final Version - All Methods Included)
+# rag_system.py (Enhanced Enterprise-Level Version)
 
 import os
 import tempfile
 import base64
-import sys # Import sys
+import sys
+import json
+import time
+import asyncio
+from typing import Dict, List, Optional, Tuple, Any, Union
+from dataclasses import dataclass, asdict
+from enum import Enum
+from pathlib import Path
+import logging
+from contextlib import contextmanager
+from functools import wraps, lru_cache
+import hashlib
 
 # --- IMPORTANT: SQLite3 Fix for ChromaDB in Deployment Environments ---
-# This ensures that chromadb uses a compatible SQLite version if the system's is outdated.
 try:
     __import__('pysqlite3')
     sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-    print("DEBUG: pysqlite3 imported and set as default sqlite3 module.")
+    logging.info("pysqlite3 imported and set as default sqlite3 module.")
 except ImportError:
-    print("DEBUG: pysqlite3 not found, falling back to system sqlite3.")
-# --- END SQLite3 Fix ---
+    logging.info("pysqlite3 not found, falling back to system sqlite3.")
 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
@@ -22,16 +31,108 @@ from langchain_community.document_loaders import PyPDFium2Loader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.retrievers import EnsembleRetriever
 from langchain_core.messages import HumanMessage
-
-# Import OpenAI components
-from langchain_openai import ChatOpenAI
-from langchain_openai import OpenAIEmbeddings # Using OpenAIEmbeddings for consistency if OpenAI LLM is chosen
-
-# Import google.generativeai for direct configuration
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 import google.generativeai as genai
 
-class RAGSystem:
-    # The advanced prompt template for high-quality, formatted answers
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+class QuestionCategory(Enum):
+    """Enumeration for question classification types."""
+    REGULATORY_FACTUAL = "Regulatory_Factual"
+    STRATEGIC_ANALYTICAL = "Strategic_Analytical"
+
+class LLMProvider(Enum):
+    """Enumeration for LLM providers."""
+    GEMINI = "Gemini"
+    OPENAI = "ChatGPT"
+
+@dataclass
+class QueryMetrics:
+    """Data class for tracking query performance metrics."""
+    question_category: str
+    primary_llm_used: str
+    fallback_used: bool
+    response_time_ms: float
+    context_chunks: int
+    response_length: int
+    timestamp: float
+
+@dataclass
+class RAGConfig:
+    """Configuration class for RAG system settings."""
+    faiss_index_path: str = "faiss_index"
+    main_retriever_k: int = 12
+    session_retriever_k: int = 3
+    ensemble_weights: List[float] = None
+    chunk_size: int = 1000
+    chunk_overlap: int = 100
+    min_substantive_length: int = 100
+    gemini_model: str = "gemini-1.5-pro-latest"
+    gemini_temperature: float = 0.1
+    openai_model: str = "gpt-4o"
+    openai_temperature: float = 0.7
+    embedding_model_gemini: str = "models/text-embedding-004"
+    embedding_model_openai: str = "text-embedding-ada-002"
+    max_retries: int = 3
+    retry_delay: float = 1.0
+
+    def __post_init__(self):
+        if self.ensemble_weights is None:
+            self.ensemble_weights = [0.7, 0.3]
+
+class RAGSystemError(Exception):
+    """Base exception class for RAG system errors."""
+    pass
+
+class ModelInitializationError(RAGSystemError):
+    """Exception raised when model initialization fails."""
+    pass
+
+class IndexLoadError(RAGSystemError):
+    """Exception raised when FAISS index loading fails."""
+    pass
+
+def retry_on_failure(max_retries: int = 3, delay: float = 1.0):
+    """Decorator for retrying failed operations."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Attempt {attempt + 1} failed for {func.__name__}: {e}. Retrying in {delay}s...")
+                        time.sleep(delay)
+                    else:
+                        logger.error(f"All {max_retries} attempts failed for {func.__name__}")
+            raise last_exception
+        return wrapper
+    return decorator
+
+@contextmanager
+def performance_timer():
+    """Context manager for measuring execution time."""
+    start_time = time.perf_counter()
+    try:
+        yield lambda: (time.perf_counter() - start_time) * 1000
+    finally:
+        pass
+
+class EnhancedRAGSystem:
+    """
+    Enhanced RAG System with improved error handling, performance monitoring,
+    caching, and enterprise-level features.
+    """
+    
+    # Advanced prompt templates
     ADVANCED_PROMPT_TEMPLATE = """---
 **ROLE AND GOAL**
 You are a highly experienced and professional consultant specializing in the operation and strategic planning of children's homes, deeply knowledgeable in Ofsted regulations and best practices. Your goal is to provide clear, actionable, and expert advice, proactively anticipating user needs and offering comprehensive, analytical feedback that informs strategic decision-making, based *only* on the provided context.
@@ -63,7 +164,6 @@ You are a highly experienced and professional consultant specializing in the ope
 ---
 **YOUR EXPERT RESPONSE:**"""
 
-    # Prompt for classifying the user's question type
     CLASSIFICATION_PROMPT = """
     Analyze the following user question and classify its primary intent into one of these two categories:
     - 'Regulatory_Factual': Questions asking for specific standards, regulations, definitions, or direct information from official documents.
@@ -75,271 +175,429 @@ You are a highly experienced and professional consultant specializing in the ope
     Category:
     """
 
-    def __init__(self):
-        """
-        Initializes the RAG system with both Gemini and OpenAI LLMs,
-        and a FAISS index for similarity search.
-        """
-        print("DEBUG: Initializing RAG System with both Gemini and OpenAI LLMs for smart routing...")
+    def __init__(self, config: Optional[RAGConfig] = None):
+        """Initialize the enhanced RAG system with comprehensive error handling and monitoring."""
+        self.config = config or RAGConfig()
+        self.metrics_history: List[QueryMetrics] = []
+        self._classification_cache: Dict[str, str] = {}
         
-        # --- Configure Google API Key directly with google.generativeai ---
+        logger.info("Initializing Enhanced RAG System...")
+        
+        # Initialize models with proper error handling
+        self._initialize_models()
+        
+        # Load FAISS index with validation
+        self._load_faiss_index()
+        
+        # Initialize session state
+        self.session_retriever = None
+        self._session_file_hash = None
+        
+        logger.info("Enhanced RAG System initialization complete.")
+
+    def _initialize_models(self) -> None:
+        """Initialize LLM models with comprehensive error handling."""
+        logger.info("Initializing AI models...")
+        
+        # Configure Google API
         gemini_api_key = os.environ.get("GOOGLE_API_KEY")
         if gemini_api_key:
             genai.configure(api_key=gemini_api_key)
-            print("DEBUG: google.generativeai configured with GOOGLE_API_KEY.")
+            logger.info("Google GenerativeAI configured successfully.")
         else:
-            print("WARNING: GOOGLE_API_KEY not found in environment. Gemini models may fail.")
-        
-        # --- Initialize Gemini LLM and Embeddings ---
+            logger.warning("GOOGLE_API_KEY not found. Gemini models will be unavailable.")
+
+        # Initialize Gemini models
         self.gemini_llm = None
         self.gemini_embeddings = None
-        print("DEBUG: Attempting to initialize Gemini LLM (Gemini 1.5 Pro) and Embeddings (text-embedding-004)...")
-        try:
-            # Pass the API key explicitly, even if configured globally, for robustness
-            self.gemini_llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0.1, google_api_key=gemini_api_key)
-            self.gemini_embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=gemini_api_key)
-            print("DEBUG: Gemini LLM and Embeddings initialized successfully.")
-        except Exception as e:
-            self.gemini_llm = None
-            self.gemini_embeddings = None
-            print(f"ERROR: Failed to initialize Gemini LLM or Embeddings. Details: {e}")
+        
+        if gemini_api_key:
+            try:
+                self.gemini_llm = ChatGoogleGenerativeAI(
+                    model=self.config.gemini_model,
+                    temperature=self.config.gemini_temperature,
+                    google_api_key=gemini_api_key
+                )
+                self.gemini_embeddings = GoogleGenerativeAIEmbeddings(
+                    model=self.config.embedding_model_gemini,
+                    google_api_key=gemini_api_key
+                )
+                logger.info("Gemini models initialized successfully.")
+            except Exception as e:
+                logger.error(f"Failed to initialize Gemini models: {e}")
+                raise ModelInitializationError(f"Gemini initialization failed: {e}")
 
-        # --- Initialize OpenAI LLM and Embeddings ---
+        # Initialize OpenAI models
         self.openai_llm = None
         self.openai_embeddings = None
-        print("DEBUG: Attempting to initialize OpenAI LLM (GPT-4o) and Embeddings (text-embedding-ada-002)...")
         
         openai_api_key = os.environ.get("OPENAI_API_KEY")
-        if not openai_api_key:
-            print("WARNING: OPENAI_API_KEY not found in environment. OpenAI models may fail.")
-            self.openai_llm = None
-            self.openai_embeddings = None
-        else:
+        if openai_api_key:
             try:
-                self.openai_llm = ChatOpenAI(model="gpt-4o", temperature=0.7, openai_api_key=openai_api_key)
-                self.openai_embeddings = OpenAIEmbeddings(model="text-embedding-ada-002", openai_api_key=openai_api_key)
-                print("DEBUG: OpenAI LLM and Embeddings initialized successfully.")
+                self.openai_llm = ChatOpenAI(
+                    model=self.config.openai_model,
+                    temperature=self.config.openai_temperature,
+                    openai_api_key=openai_api_key
+                )
+                self.openai_embeddings = OpenAIEmbeddings(
+                    model=self.config.embedding_model_openai,
+                    openai_api_key=openai_api_key
+                )
+                logger.info("OpenAI models initialized successfully.")
             except Exception as e:
-                self.openai_llm = None
-                self.openai_embeddings = None
-                print(f"ERROR: Failed to initialize OpenAI LLM or Embeddings. Details: {e}")
+                logger.error(f"Failed to initialize OpenAI models: {e}")
+                if not self.gemini_llm:  # Only raise if no fallback available
+                    raise ModelInitializationError(f"OpenAI initialization failed and no Gemini fallback: {e}")
+        else:
+            logger.warning("OPENAI_API_KEY not found. OpenAI models will be unavailable.")
 
-        # Determine which embeddings to use for FAISS loading
-        # IMPORTANT: The embeddings model used here MUST match the one used during ingestion.
-        # It is highly recommended to ingest your data using Google embeddings for this setup.
+        # Determine primary embeddings
         if self.gemini_embeddings:
             self.embeddings = self.gemini_embeddings
-            print("DEBUG: Using Gemini embeddings for FAISS index loading.")
-        elif self.openai_embeddings: # Fallback to OpenAI embeddings if Gemini embeddings failed to init
+            logger.info("Using Gemini embeddings as primary.")
+        elif self.openai_embeddings:
             self.embeddings = self.openai_embeddings
-            print("DEBUG: Using OpenAI embeddings for FAISS index loading (WARNING: Ensure ingest used OpenAI embeddings).")
+            logger.info("Using OpenAI embeddings as primary.")
         else:
-            raise RuntimeError("Neither Gemini nor OpenAI embeddings could be initialized. Cannot load FAISS index.")
+            raise ModelInitializationError("No embedding models could be initialized.")
 
-        db_path = "faiss_index"
-        print(f"DEBUG: Checking for FAISS index at: '{db_path}'...")
+        # Validate at least one LLM is available
+        if not self.gemini_llm and not self.openai_llm:
+            raise ModelInitializationError("No LLM models could be initialized.")
+
+    @retry_on_failure(max_retries=3, delay=1.0)
+    def _load_faiss_index(self) -> None:
+        """Load FAISS index with retry logic and validation."""
+        db_path = Path(self.config.faiss_index_path)
         
-        if not os.path.exists(db_path):
-            print(f"ERROR: FAISS index directory NOT FOUND at '{db_path}'. This is a critical error.")
-            raise FileNotFoundError(
-                f"FAISS index not found at '{db_path}'. "
-                "Please ensure you have run ingest.py locally to create it, and then committed and pushed the 'faiss_index' directory to your GitHub repository."
-            )
+        if not db_path.exists():
+            error_msg = f"FAISS index not found at '{db_path}'. Please run ingest.py to create it."
+            logger.error(error_msg)
+            raise IndexLoadError(error_msg)
         
-        print(f"DEBUG: FAISS index directory found. Attempting to load from '{db_path}'...")
+        logger.info(f"Loading FAISS index from '{db_path}'...")
+        
         try:
             db = FAISS.load_local(
-                db_path, self.embeddings, allow_dangerous_deserialization=True
+                str(db_path), 
+                self.embeddings, 
+                allow_dangerous_deserialization=True
             )
-            print("DEBUG: FAISS index loaded successfully.")
+            
+            self.main_retriever = db.as_retriever(
+                search_type="similarity",
+                search_kwargs={'k': self.config.main_retriever_k}
+            )
+            
+            logger.info("FAISS index loaded successfully.")
+            
         except Exception as e:
-            print(f"ERROR: Failed to load FAISS index from '{db_path}'. Details: {e}")
-            raise
-        
-        self.main_retriever = db.as_retriever(
-            search_type="similarity",
-            search_kwargs={'k': 12} 
-        )
-        print("DEBUG: Main retriever initialized.")
-        
-        self.session_retriever = None
-        print("DEBUG: RAG System initialization complete.")
+            error_msg = f"Failed to load FAISS index: {e}"
+            logger.error(error_msg)
+            raise IndexLoadError(error_msg)
 
     def get_current_retriever(self):
-        """Returns the correct retriever (ensemble or main) for the current session."""
+        """Get the appropriate retriever with proper weighting."""
         if self.session_retriever:
-            print("DEBUG: Using Ensemble Retriever (FAISS + session file)")
+            logger.debug("Using ensemble retriever (FAISS + session file)")
             return EnsembleRetriever(
                 retrievers=[self.main_retriever, self.session_retriever],
-                weights=[0.7, 0.3]
+                weights=self.config.ensemble_weights
             )
         else:
-            print("DEBUG: Using Main FAISS Retriever")
+            logger.debug("Using main FAISS retriever")
             return self.main_retriever
 
-    def process_uploaded_file(self, uploaded_file_bytes: bytes):
-        """Processes a user-uploaded file in-memory and sets the session retriever."""
-        print("DEBUG: Processing uploaded file...")
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                tmp_file.write(uploaded_file_bytes)
-                tmp_file_path = tmp_file.name
-            print(f"DEBUG: Temporary file created at {tmp_file_path}")
-            loader = PyPDFium2Loader(tmp_file_path)
-            docs = loader.load()
-            print(f"DEBUG: Loaded {len(docs)} documents from temporary file.")
-        finally:
-            if 'tmp_file_path' in locals() and os.path.exists(tmp_file_path):
-                os.remove(tmp_file_path)
-                print(f"DEBUG: Temporary file {tmp_file_path} removed.")
+    def _calculate_file_hash(self, file_bytes: bytes) -> str:
+        """Calculate SHA-256 hash of file for caching."""
+        return hashlib.sha256(file_bytes).hexdigest()
 
-        # Note: Embeddings used for session documents must be consistent with the main index
-        # We use the self.embeddings which was determined during __init__ based on availability
-        chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(docs)
-        print(f"DEBUG: Split uploaded document into {len(chunks)} chunks.")
-        temp_db = Chroma.from_documents(chunks, self.embeddings) # Using self.embeddings
-        self.session_retriever = temp_db.as_retriever(search_kwargs={"k": 3})
-        print("DEBUG: Temporary session retriever created.")
+    def process_uploaded_file(self, uploaded_file_bytes: bytes) -> Dict[str, Any]:
+        """
+        Process uploaded file with caching and enhanced error handling.
+        
+        Returns:
+            Dict containing processing results and metadata
+        """
+        file_hash = self._calculate_file_hash(uploaded_file_bytes)
+        
+        # Check if file is already processed
+        if self._session_file_hash == file_hash:
+            logger.info("File already processed (same hash), skipping reprocessing.")
+            return {"status": "cached", "hash": file_hash}
+        
+        logger.info("Processing new uploaded file...")
+        
+        with performance_timer() as get_time:
+            try:
+                # Create temporary file
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                    tmp_file.write(uploaded_file_bytes)
+                    tmp_file_path = tmp_file.name
+                
+                logger.debug(f"Created temporary file: {tmp_file_path}")
+                
+                # Load and process document
+                loader = PyPDFium2Loader(tmp_file_path)
+                docs = loader.load()
+                logger.info(f"Loaded {len(docs)} pages from uploaded file.")
+                
+                # Split into chunks
+                text_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=self.config.chunk_size,
+                    chunk_overlap=self.config.chunk_overlap
+                )
+                chunks = text_splitter.split_documents(docs)
+                logger.info(f"Split document into {len(chunks)} chunks.")
+                
+                # Create vector store
+                temp_db = Chroma.from_documents(chunks, self.embeddings)
+                self.session_retriever = temp_db.as_retriever(
+                    search_kwargs={"k": self.config.session_retriever_k}
+                )
+                
+                # Update cache
+                self._session_file_hash = file_hash
+                
+                processing_time = get_time()
+                logger.info(f"File processed successfully in {processing_time:.2f}ms")
+                
+                return {
+                    "status": "processed",
+                    "hash": file_hash,
+                    "pages": len(docs),
+                    "chunks": len(chunks),
+                    "processing_time_ms": processing_time
+                }
+                
+            except Exception as e:
+                logger.error(f"Failed to process uploaded file: {e}")
+                raise RAGSystemError(f"File processing failed: {e}")
+                
+            finally:
+                # Cleanup temporary file
+                if 'tmp_file_path' in locals() and os.path.exists(tmp_file_path):
+                    os.remove(tmp_file_path)
+                    logger.debug("Temporary file cleaned up.")
 
-    def clear_session(self):
-        """Clears the session-specific retriever for uploaded files."""
+    def clear_session(self) -> None:
+        """Clear session data and cache."""
         self.session_retriever = None
-        print("DEBUG: Session retriever cleared.")
+        self._session_file_hash = None
+        logger.info("Session data cleared.")
 
-    def _classify_question(self, question: str) -> str:
-        """
-        Classifies the user's question as 'Regulatory_Factual' or 'Strategic_Analytical'.
-        Uses Gemini for classification.
-        """
+    @lru_cache(maxsize=128)
+    def _classify_question_cached(self, question: str) -> str:
+        """Cached version of question classification."""
+        return self._classify_question_internal(question)
+
+    def _classify_question_internal(self, question: str) -> str:
+        """Internal method for question classification."""
         if not self.gemini_llm:
-            print("WARNING: Gemini LLM not available for classification. Defaulting to 'Strategic_Analytical'.")
-            return "Strategic_Analytical" # Default if Gemini isn't available
+            logger.warning("Gemini LLM unavailable for classification. Using default.")
+            return QuestionCategory.STRATEGIC_ANALYTICAL.value
 
         classification_prompt = self.CLASSIFICATION_PROMPT.format(question=question)
-        print(f"DEBUG: Classifying question: '{question}'")
+        
         try:
-            classification_response = self.gemini_llm.invoke(classification_prompt)
-            category = classification_response.content.strip()
-            print(f"DEBUG: Question classified as: '{category}'")
-            if category in ["Regulatory_Factual", "Strategic_Analytical"]:
+            with performance_timer() as get_time:
+                response = self.gemini_llm.invoke(classification_prompt)
+                classification_time = get_time()
+            
+            category = response.content.strip()
+            logger.debug(f"Question classified as '{category}' in {classification_time:.2f}ms")
+            
+            if category in [cat.value for cat in QuestionCategory]:
                 return category
             else:
-                print(f"WARNING: Unexpected classification: '{category}'. Defaulting to 'Strategic_Analytical'.")
-                return "Strategic_Analytical" # Fallback for unexpected classification
-        except Exception as e:
-            print(f"ERROR: Failed to classify question with Gemini: {e}. Defaulting to 'Strategic_Analytical'.")
-            return "Strategic_Analytical" # Fallback if classification fails
-
-    def query(self, user_question: str, context_text: str, source_docs: list, image_bytes=None):
-        """
-        Queries the LLM with the provided context and passes through the source documents.
-        Implements smart routing: classifies the question and routes to the appropriate LLM.
-        Includes fallback if the primary LLM fails or gives a non-substantive answer.
-        """
-        print("DEBUG: Starting query process with smart routing strategy...")
-        full_prompt_text = self.ADVANCED_PROMPT_TEMPLATE.format(
-            context=context_text, 
-            question=user_question
-        )
-        
-        response = None
-        used_llm = "None"
-        MIN_SUBSTANTIVE_LENGTH = 100 # Define a minimum length for a "substantive" answer
-
-        # Classify the question to determine primary LLM
-        question_category = self._classify_question(user_question)
-
-        primary_llm = None
-        fallback_llm = None
-        primary_llm_name = ""
-        fallback_llm_name = ""
-
-        if question_category == "Regulatory_Factual":
-            primary_llm = self.gemini_llm
-            primary_llm_name = "Gemini"
-            fallback_llm = self.openai_llm
-            fallback_llm_name = "ChatGPT"
-        elif question_category == "Strategic_Analytical":
-            primary_llm = self.openai_llm
-            primary_llm_name = "ChatGPT"
-            fallback_llm = self.gemini_llm
-            fallback_llm_name = "Gemini"
-        else:
-            # Should not happen if _classify_question works, but as a safeguard
-            print("WARNING: Unknown question category. Defaulting to Gemini as primary.")
-            primary_llm = self.gemini_llm
-            primary_llm_name = "Gemini"
-            fallback_llm = self.openai_llm
-            fallback_llm_name = "Gemini" # Fallback to Gemini if primary is unknown or fails
-
-        # --- Try Primary LLM ---
-        if primary_llm:
-            print(f"DEBUG: Attempting query with primary LLM: {primary_llm_name} (Category: {question_category})...")
-            try:
-                if image_bytes:
-                    print(f"DEBUG: {primary_llm_name}: Image bytes provided, preparing for multimodal query.")
-                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-                    message = HumanMessage(
-                        content=[
-                            {"type": "text", "text": full_prompt_text},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                        ]
-                    )
-                    response = primary_llm.invoke([message])
-                else:
-                    print(f"DEBUG: {primary_llm_name}: No image bytes provided, performing text-only query.")
-                    response = primary_llm.invoke(full_prompt_text)
+                logger.warning(f"Unexpected classification: '{category}'. Using default.")
+                return QuestionCategory.STRATEGIC_ANALYTICAL.value
                 
-                # Check for useful response from primary LLM
-                if (response and response.content and 
-                    "cannot answer this question" not in response.content.lower() and
-                    len(response.content) >= MIN_SUBSTANTIVE_LENGTH):
-                    used_llm = primary_llm_name
-                    print(f"DEBUG: Primary LLM ({primary_llm_name}) provided a useful and substantive response.")
-                else:
-                    print(f"DEBUG: Primary LLM ({primary_llm_name}) response was not useful/substantive or indicated inability to answer. Falling back...")
-                    response = None # Clear response to try fallback LLM
-            except Exception as e:
-                print(f"ERROR: Primary LLM ({primary_llm_name}) query failed: {e}. Falling back to {fallback_llm_name}...")
-                response = None # Clear response to try fallback LLM
+        except Exception as e:
+            logger.error(f"Classification failed: {e}. Using default.")
+            return QuestionCategory.STRATEGIC_ANALYTICAL.value
+
+    def _get_llm_routing(self, question_category: str) -> Tuple[Any, str, Any, str]:
+        """Determine LLM routing based on question category."""
+        if question_category == QuestionCategory.REGULATORY_FACTUAL.value:
+            return (
+                self.gemini_llm, LLMProvider.GEMINI.value,
+                self.openai_llm, LLMProvider.OPENAI.value
+            )
         else:
-            print(f"DEBUG: Primary LLM ({primary_llm_name}) not initialized, skipping to fallback.")
+            return (
+                self.openai_llm, LLMProvider.OPENAI.value,
+                self.gemini_llm, LLMProvider.GEMINI.value
+            )
 
-        # --- Try Fallback LLM if primary failed ---
-        if not response and fallback_llm:
-            print(f"DEBUG: Attempting query with fallback LLM: {fallback_llm_name}...")
-            try:
-                if image_bytes:
-                    print(f"DEBUG: {fallback_llm_name}: Image bytes provided, preparing for multimodal query.")
-                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-                    message = HumanMessage(
-                        content=[
-                            {"type": "text", "text": full_prompt_text},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                        ]
-                    )
-                    response = fallback_llm.invoke([message])
-                else:
-                    print(f"DEBUG: {fallback_llm_name}: No image bytes provided, performing text-only query.")
-                    response = fallback_llm.invoke(full_prompt_text)
+    def _invoke_llm(self, llm, prompt: str, image_bytes: Optional[bytes] = None) -> Optional[str]:
+        """Invoke LLM with proper error handling and multimodal support."""
+        if not llm:
+            return None
+            
+        try:
+            if image_bytes:
+                logger.debug("Preparing multimodal query with image")
+                image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                message = HumanMessage(
+                    content=[
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                    ]
+                )
+                response = llm.invoke([message])
+            else:
+                response = llm.invoke(prompt)
+            
+            return response.content if response else None
+            
+        except Exception as e:
+            logger.error(f"LLM invocation failed: {e}")
+            return None
 
-                if response and response.content:
-                    used_llm = fallback_llm_name
-                    print(f"DEBUG: Fallback LLM ({fallback_llm_name}) provided a response.")
-                else:
-                    print(f"DEBUG: Fallback LLM ({fallback_llm_name}) response was empty. No useful response from any LLM.")
-            except Exception as e:
-                print(f"ERROR: Fallback LLM ({fallback_llm_name}) query failed: {e}. No response available.")
-                response = None
-        else:
-            if not fallback_llm:
-                print(f"DEBUG: Fallback LLM ({fallback_llm_name}) not initialized.")
-
-        final_answer = response.content if response else "Based on the provided context, I cannot answer this question using the available models."
+    def _is_substantive_response(self, response: str) -> bool:
+        """Check if response is substantive and useful."""
+        if not response or len(response) < self.config.min_substantive_length:
+            return False
         
-        # Optionally, you can append which LLM was used to the answer for debugging/user info
-        # final_answer += f"\n\n(Answer generated by: {used_llm})"
+        non_substantive_indicators = [
+            "cannot answer this question",
+            "don't have enough information",
+            "unable to provide",
+            "insufficient context"
+        ]
+        
+        return not any(indicator in response.lower() for indicator in non_substantive_indicators)
 
-        print(f"DEBUG: Final LLM response received from {used_llm}.")
-        return {"answer": final_answer, "source_documents": source_docs}
+    def query(self, user_question: str, context_text: str, source_docs: List, 
+             image_bytes: Optional[bytes] = None) -> Dict[str, Any]:
+        """
+        Enhanced query method with comprehensive monitoring and fallback logic.
+        """
+        logger.info(f"Processing query: {user_question[:100]}...")
+        
+        with performance_timer() as get_total_time:
+            # Classify question
+            question_category = self._classify_question_cached(user_question)
+            
+            # Prepare prompt
+            full_prompt = self.ADVANCED_PROMPT_TEMPLATE.format(
+                context=context_text,
+                question=user_question
+            )
+            
+            # Determine LLM routing
+            primary_llm, primary_name, fallback_llm, fallback_name = self._get_llm_routing(question_category)
+            
+            response = None
+            used_llm = "None"
+            fallback_used = False
+            
+            # Try primary LLM
+            if primary_llm:
+                logger.debug(f"Attempting query with primary LLM: {primary_name}")
+                with performance_timer() as get_primary_time:
+                    response = self._invoke_llm(primary_llm, full_prompt, image_bytes)
+                    primary_time = get_primary_time()
+                
+                if response and self._is_substantive_response(response):
+                    used_llm = primary_name
+                    logger.info(f"Primary LLM ({primary_name}) provided substantive response in {primary_time:.2f}ms")
+                else:
+                    logger.warning(f"Primary LLM ({primary_name}) response was not substantive")
+                    response = None
+            
+            # Try fallback LLM if needed
+            if not response and fallback_llm:
+                logger.debug(f"Attempting query with fallback LLM: {fallback_name}")
+                fallback_used = True
+                
+                with performance_timer() as get_fallback_time:
+                    response = self._invoke_llm(fallback_llm, full_prompt, image_bytes)
+                    fallback_time = get_fallback_time()
+                
+                if response and self._is_substantive_response(response):
+                    used_llm = fallback_name
+                    logger.info(f"Fallback LLM ({fallback_name}) provided response in {fallback_time:.2f}ms")
+                else:
+                    logger.warning(f"Fallback LLM ({fallback_name}) also failed to provide substantive response")
+            
+            # Prepare final response
+            final_answer = response or "Based on the provided context, I cannot answer this question using the available models."
+            total_time = get_total_time()
+            
+            # Record metrics
+            metrics = QueryMetrics(
+                question_category=question_category,
+                primary_llm_used=used_llm,
+                fallback_used=fallback_used,
+                response_time_ms=total_time,
+                context_chunks=len(source_docs),
+                response_length=len(final_answer),
+                timestamp=time.time()
+            )
+            self.metrics_history.append(metrics)
+            
+            logger.info(f"Query completed in {total_time:.2f}ms using {used_llm}")
+            
+            return {
+                "answer": final_answer,
+                "source_documents": source_docs,
+                "metadata": {
+                    "llm_used": used_llm,
+                    "question_category": question_category,
+                    "response_time_ms": total_time,
+                    "fallback_used": fallback_used,
+                    "context_chunks": len(source_docs)
+                }
+            }
 
+    def get_system_health(self) -> Dict[str, Any]:
+        """Get comprehensive system health information."""
+        return {
+            "models": {
+                "gemini_llm": self.gemini_llm is not None,
+                "gemini_embeddings": self.gemini_embeddings is not None,
+                "openai_llm": self.openai_llm is not None,
+                "openai_embeddings": self.openai_embeddings is not None,
+                "primary_embeddings": type(self.embeddings).__name__
+            },
+            "index": {
+                "faiss_loaded": self.main_retriever is not None,
+                "session_active": self.session_retriever is not None,
+                "session_file_hash": self._session_file_hash
+            },
+            "metrics": {
+                "total_queries": len(self.metrics_history),
+                "cache_size": self._classify_question_cached.cache_info()._asdict() if hasattr(self._classify_question_cached, 'cache_info') else None
+            },
+            "config": asdict(self.config)
+        }
+
+    def get_performance_metrics(self, last_n: Optional[int] = None) -> Dict[str, Any]:
+        """Get performance metrics for recent queries."""
+        metrics = self.metrics_history[-last_n:] if last_n else self.metrics_history
+        
+        if not metrics:
+            return {"message": "No metrics available"}
+        
+        response_times = [m.response_time_ms for m in metrics]
+        
+        return {
+            "query_count": len(metrics),
+            "avg_response_time_ms": sum(response_times) / len(response_times),
+            "min_response_time_ms": min(response_times),
+            "max_response_time_ms": max(response_times),
+            "fallback_usage_rate": sum(1 for m in metrics if m.fallback_used) / len(metrics),
+            "category_distribution": {
+                cat.value: sum(1 for m in metrics if m.question_category == cat.value)
+                for cat in QuestionCategory
+            },
+            "llm_usage": {
+                provider.value: sum(1 for m in metrics if m.primary_llm_used == provider.value)
+                for provider in LLMProvider
+            }
+        }
+
+# Legacy compatibility - alias for backward compatibility
+RAGSystem = EnhancedRAGSystem
