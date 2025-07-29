@@ -167,28 +167,7 @@ mode_tab1, mode_tab2 = st.tabs(["💬 Ask Questions", "📷 Analyze Images"])
 st.markdown('</div>', unsafe_allow_html=True)
 
 with mode_tab1:
-    # Quick Action Buttons (Suggestion 9) - High on page
-    st.subheader("🚀 Quick Actions")
-    
-    quick_actions = {
-        "🚨 Inspection Prep": "We have an upcoming Ofsted inspection. What should we focus on to ensure we're fully prepared and can demonstrate our improvements?",
-        "💰 Budget Planning": "Help us develop an effective budget strategy for the upcoming financial year while maintaining quality of care.",
-        "👥 Staff Issues": "We're experiencing staff retention challenges. What strategies can we implement to improve staff satisfaction and reduce turnover?",
-        "🏠 New Admission": "We're admitting a new child to our home. What processes and considerations should we prioritize for a successful transition?",
-        "📋 Policy Review": "We need to review and update our policies. What are the current best practices and regulatory requirements we should include?",
-        "🎯 Quality Improvement": "We want to enhance our quality of care and move towards outstanding. What key areas should we focus on?"
-    }
-    
-    # Display quick actions in a clean grid
-    cols = st.columns(3)
-    for i, (action, question) in enumerate(quick_actions.items()):
-        with cols[i % 3]:
-            if st.button(action, key=f"quick_{i}", use_container_width=True):
-                st.session_state.quick_question = question
-
-    st.markdown("---")
-    
-    # Main question input (Suggestion 2) - Top 1/3 of page
+    # Main question input FIRST - most important function (Suggestion 2)
     st.subheader("💬 Ask Your Question")
     
     # Initialize session state for question
@@ -222,6 +201,28 @@ with mode_tab1:
     # Contextual help (Suggestion 18)
     tip = get_contextual_tip(user_question)
     st.markdown(f'<div class="contextual-tip">{tip}</div>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Quick Action Buttons (Suggestion 9) - Below question input
+    st.subheader("🚀 Quick Actions")
+    st.markdown("*Or choose from these common scenarios:*")
+    
+    quick_actions = {
+        "🚨 Inspection Prep": "We have an upcoming Ofsted inspection. What should we focus on to ensure we're fully prepared and can demonstrate our improvements?",
+        "💰 Budget Planning": "Help us develop an effective budget strategy for the upcoming financial year while maintaining quality of care.",
+        "👥 Staff Issues": "We're experiencing staff retention challenges. What strategies can we implement to improve staff satisfaction and reduce turnover?",
+        "🏠 New Admission": "We're admitting a new child to our home. What processes and considerations should we prioritize for a successful transition?",
+        "📋 Policy Review": "We need to review and update our policies. What are the current best practices and regulatory requirements we should include?",
+        "🎯 Quality Improvement": "We want to enhance our quality of care and move towards outstanding. What key areas should we focus on?"
+    }
+    
+    # Display quick actions in a clean grid
+    cols = st.columns(3)
+    for i, (action, question) in enumerate(quick_actions.items()):
+        with cols[i % 3]:
+            if st.button(action, key=f"quick_{i}", use_container_width=True):
+                st.session_state.quick_question = question
     
     # Optional document upload - simplified
     with st.expander("📎 Add Supporting Documents (Optional)"):
