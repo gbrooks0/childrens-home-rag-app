@@ -1,15 +1,30 @@
+# Your existing requirements (keep all of these)
 streamlit
 langchain
 langchain-google-genai
-langchain-experimental
-beautifulsoup4
-pypdfium2
-requests
-faiss-cpu
-numpy
-unstructured[docx]
-pysqlite3-binary
+langchain-community
 langchain-chroma
 langchain-openai
-openai
+faiss-cpu
 google-generativeai
+chromadb
+pypdfium2
+
+# NEW requirements for compliance analysis features
+plotly>=5.0.0              # For interactive charts and dashboards
+pandas>=1.3.0              # For data manipulation and analysis (if not already included)
+PyPDF2>=3.0.0              # For PDF document analysis
+python-docx>=0.8.11        # For Word document analysis
+openpyxl>=3.0.0            # For Excel export functionality
+reportlab>=3.6.0           # For PDF report generation
+Pillow>=8.0.0              # For image processing (if not already included)
+
+# Optional: For enhanced document processing
+mammoth>=1.4.0             # Better Word document conversion
+pdfplumber>=0.7.0          # Enhanced PDF text extraction
+python-magic>=0.4.0        # File type detection
+
+# Optional: For advanced analytics and reporting
+matplotlib>=3.5.0          # Additional plotting capabilities
+seaborn>=0.11.0            # Statistical visualization
+jinja2>=3.0.0              # Template engine for reports
