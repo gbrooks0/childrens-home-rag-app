@@ -1,5 +1,15 @@
-# app.py - Enhanced Clean Professional Version
+# app.py - Fixed Version with SQLite Compatibility
 
+# CRITICAL: SQLite3 Fix MUST be first, before any other imports
+import sys
+try:
+    __import__('pysqlite3')
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+    print("DEBUG: pysqlite3 imported and set as default sqlite3 module.")
+except ImportError:
+    print("DEBUG: pysqlite3 not found, falling back to system sqlite3.")
+
+# Now safe to import other modules
 import streamlit as st
 import os
 import re
@@ -17,7 +27,7 @@ st.set_page_config(
     page_title="Children's Home Management System",
     page_icon="🏠",
     layout="wide",
-    initial_sidebar_state="collapsed"  # Cleaner initial state
+    initial_sidebar_state="collapsed"
 )
 
 # Common question patterns for auto-complete
@@ -64,7 +74,7 @@ def get_contextual_tip(current_input=""):
     elif "budget" in current_input.lower() or "cost" in current_input.lower():
         return "💡 **Tip:** Include your home size, capacity, or specific financial challenges for relevant guidance"
     else:
-        return tips[len(current_input) % len(tips)]  # Rotate tips based on input length
+        return tips[len(current_input) % len(tips)]
 
 def get_question_suggestions(input_text):
     """Get auto-complete suggestions based on user input."""
@@ -77,7 +87,7 @@ def get_question_suggestions(input_text):
     for question in COMMON_QUESTIONS:
         if any(word in question.lower() for word in input_lower.split()):
             suggestions.append(question)
-        if len(suggestions) >= 5:  # Limit to 5 suggestions
+        if len(suggestions) >= 5:
             break
     
     return suggestions
@@ -167,7 +177,7 @@ mode_tab1, mode_tab2 = st.tabs(["💬 Ask Questions", "📷 Analyze Images"])
 st.markdown('</div>', unsafe_allow_html=True)
 
 with mode_tab1:
-    # Main question input FIRST - most important function (Suggestion 2)
+    # Main question input FIRST - most important function
     st.subheader("💬 Ask Your Question")
     
     # Initialize session state for question
@@ -179,7 +189,7 @@ with mode_tab1:
         st.session_state.current_question = st.session_state.quick_question
         delattr(st.session_state, 'quick_question')
     
-    # Question input with auto-complete (Suggestion 8)
+    # Question input with auto-complete
     user_question = st.text_area(
         "Describe your situation or question:",
         value=st.session_state.current_question,
@@ -188,7 +198,7 @@ with mode_tab1:
         key="question_input"
     )
     
-    # Auto-complete suggestions (Suggestion 8)
+    # Auto-complete suggestions
     if user_question and len(user_question) > 3:
         suggestions = get_question_suggestions(user_question)
         if suggestions:
@@ -198,13 +208,13 @@ with mode_tab1:
                     st.session_state.current_question = suggestion
                     st.rerun()
     
-    # Contextual help (Suggestion 18)
+    # Contextual help
     tip = get_contextual_tip(user_question)
     st.markdown(f'<div class="contextual-tip">{tip}</div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
-    # Quick Action Buttons (Suggestion 9) - Below question input
+    # Quick Action Buttons - Below question input
     st.subheader("🚀 Quick Actions")
     st.markdown("*Or choose from these common scenarios:*")
     
@@ -288,7 +298,7 @@ with mode_tab1:
             st.warning("⚠️ Please enter a question to receive guidance")
 
 with mode_tab2:
-    # Visual analysis high on page (Suggestion 6)
+    # Visual analysis high on page
     if not COMPLIANCE_FEATURES_AVAILABLE:
         st.error("❌ Visual analysis features are currently being upgraded.")
         st.info("💡 Use the 'Ask Questions' tab for comprehensive guidance.")
@@ -300,7 +310,7 @@ with mode_tab2:
         if 'compliance_analyzer' not in st.session_state:
             st.session_state.compliance_analyzer = ComplianceAnalyzer(st.session_state.rag_system)
         
-        # Smart image analysis prompts (Suggestion 16 - simplified version)
+        # Smart image analysis prompts
         st.markdown("**🎯 What would you like to focus on?**")
         
         analysis_focus_options = {
@@ -329,7 +339,6 @@ with mode_tab2:
             col1, col2 = st.columns([2, 1])
             
             with col1:
-                # Fixed deprecated parameter (Suggestion 7)
                 st.image(uploaded_image, caption="Image for Analysis", use_container_width=True)
             
             with col2:
