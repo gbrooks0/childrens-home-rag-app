@@ -1,5 +1,5 @@
 # Add this to your existing app.py file
-
+import streamlit as st
 # At the top of your app.py, add this import after your existing imports:
 try:
     from compliance_analyzer import ComplianceAnalyzer, create_compliance_interface
