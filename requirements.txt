@@ -9,6 +9,7 @@ faiss-cpu
 google-generativeai
 chromadb
 pypdfium2
+pysqlite3-binary
 
 # NEW requirements for compliance analysis features
 plotly>=5.0.0              # For interactive charts and dashboards
