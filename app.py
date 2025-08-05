@@ -353,10 +353,9 @@ def setup_environment_variables():
     global _ENV_SETUP_LOGGED
     
     try:
-        # Get API keys from secrets
-        api_keys = st.secrets.get("api_keys", {})
-        openai_key = api_keys.get("openai")
-        google_key = api_keys.get("google")
+        # Direct access to simple secrets format (Streamlit Cloud compatible)
+        openai_key = st.secrets.get("OPENAI_API_KEY")
+        google_key = st.secrets.get("GOOGLE_API_KEY")
         
         # Set OpenAI key
         if openai_key:
