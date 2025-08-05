@@ -391,11 +391,18 @@ def setup_environment_variables():
 
 @st.cache_resource
 def initialize_rag_system():
-    """Initialize RAG system with one-time logging"""
+    """Initialize RAG system with enhanced error handling"""
     debug_log("Initializing RAG system...", once_only=True, key="rag_init_start")
     
-    # Fix asyncio issues silently
     try:
+        # Check if FAISS index exists
+        if not os.path.exists("faiss_index"):
+            st.error("❌ FAISS index not found!")
+            st.info("💡 The vector database needs to be created first.")
+            st.info("🔧 Please run the ingestion script to create the index.")
+            return None
+        
+        # Fix asyncio issues silently
         import asyncio
         
         # Additional threading environment variables for gRPC
@@ -422,21 +429,28 @@ def initialize_rag_system():
     
     try:
         # Try to initialize RAG system
+        from rag_system import RAGSystem  # Import here to catch import errors
         rag_system = RAGSystem()
         debug_log("RAG system initialized successfully", once_only=True, key="rag_init_success")
         return rag_system
         
+    except ImportError as e:
+        st.error(f"❌ Import Error: {e}")
+        st.info("💡 Missing required packages. Check requirements.txt")
+        return None
+        
     except Exception as e:
+        st.error(f"❌ RAG System Error: {e}")
         debug_log(f"RAG system initialization failed: {e}")
         
-        # Provide helpful error information only in debug mode
+        # Provide specific error guidance
         error_msg = str(e).lower()
-        if "api" in error_msg or "key" in error_msg:
-            debug_log("HINT: Check API key configuration")
+        if "faiss" in error_msg:
+            st.info("💡 FAISS vector database not found or corrupted")
+        elif "api" in error_msg or "key" in error_msg:
+            st.info("💡 Check API key configuration in secrets")
         elif "import" in error_msg or "module" in error_msg:
-            debug_log("HINT: Check dependencies installation")
-        elif "connection" in error_msg or "network" in error_msg:
-            debug_log("HINT: Check internet connection")
+            st.info("💡 Check that all dependencies are in requirements.txt")
         
         return None
 
