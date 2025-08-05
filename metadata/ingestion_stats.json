@@ -1,0 +1,8 @@
+{
+  "total_documents": 2413,
+  "total_chunks": 5422,
+  "average_chunk_size": 1204.6643305053485,
+  "ingestion_date": "2025-08-05T10:48:22.664944",
+  "chunk_size": 1500,
+  "chunk_overlap": 300
+}

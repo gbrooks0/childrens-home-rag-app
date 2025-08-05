@@ -10,6 +10,9 @@ google-generativeai
 chromadb
 pypdfium2
 pysqlite3-binary
+PyPDF2>=3.0.0
+python-docx>=0.8.11
+python-magic>=0.4.27  # Optional for file type detection
 
 # NEW requirements for compliance analysis features
 plotly>=5.0.0              # For interactive charts and dashboards
@@ -29,3 +32,4 @@ python-magic>=0.4.0        # File type detection
 matplotlib>=3.5.0          # Additional plotting capabilities
 seaborn>=0.11.0            # Statistical visualization
 jinja2>=3.0.0              # Template engine for reports
+

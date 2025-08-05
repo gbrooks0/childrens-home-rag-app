@@ -1,20 +1,96 @@
-# app.py - FINAL COMPLETE VERSION WITH ALL FIXES
-# Includes all enhancements and fixes discussed in our conversation
+# app.py - STREAMLINED VERSION WITH PERFORMANCE OPTIMIZATION
 
-# CRITICAL: SQLite3 Fix MUST be first, before any other imports
-import sys
-try:
-    __import__('pysqlite3')
-    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-    print("DEBUG: pysqlite3 imported and set as default sqlite3 module.")
-except ImportError:
-    print("DEBUG: pysqlite3 not found, falling back to system sqlite3.")
-
-# Safe imports after SQLite fix
-import streamlit as st
+# STEP 1: Set debug mode control FIRST
 import os
-import re
+import sys
+import warnings
+import tempfile
+import hashlib
+from pathlib import Path
+import streamlit as st
 import time
+import datetime
+from PIL import Image
+import io
+# Optional imports for document processing
+try:
+    import PyPDF2
+    PDF_SUPPORT = True
+except ImportError:
+    PDF_SUPPORT = False
+
+try:
+    import docx
+    DOCX_SUPPORT = True
+except ImportError:
+    DOCX_SUPPORT = False
+
+try:
+    import psutil
+    SYSTEM_MONITOR = True
+except ImportError:
+    SYSTEM_MONITOR = False
+
+# Set default debug mode to FALSE unless explicitly enabled
+if 'DEBUG_MODE' not in os.environ:
+    os.environ['DEBUG_MODE'] = 'false'
+
+# Helper function for conditional debug logging
+# Global flags to prevent repeated debug messages
+_SQLITE_LOGGED = False
+_ENV_SETUP_LOGGED = False
+
+def debug_log(message, once_only=False, key=None):
+    """Only print debug messages if debug mode is enabled, with optional one-time logging"""
+    if os.getenv('DEBUG_MODE', 'false').lower() == 'true':
+        if once_only and key:
+            # Use session state to track what we've already logged
+            if 'debug_logged' not in st.session_state:
+                st.session_state.debug_logged = set()
+            
+            if key not in st.session_state.debug_logged:
+                print(f"DEBUG: {message}")
+                st.session_state.debug_logged.add(key)
+        elif not once_only:
+            print(f"DEBUG: {message}")
+
+# STEP 2: Suppress ALL Google/gRPC warnings
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
+os.environ['GLOG_minloglevel'] = '3'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['GRPC_ENABLE_FORK_SUPPORT'] = '0'
+os.environ['GRPC_POLL_STRATEGY'] = 'poll'
+
+# Suppress Python warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*absl.*")
+warnings.filterwarnings("ignore", message=".*gRPC.*")
+warnings.filterwarnings("ignore", module="langchain")
+
+# STEP 3: SQLite3 Fix with SILENT logging
+
+def setup_sqlite_with_clean_logging():
+    """Setup SQLite with one-time logging only"""
+    global _SQLITE_LOGGED
+    
+    try:
+        __import__('pysqlite3')
+        sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+        if not _SQLITE_LOGGED:
+            debug_log("Using pysqlite3", once_only=True, key="sqlite_pysqlite")
+            _SQLITE_LOGGED = True
+    except ImportError:
+        if not _SQLITE_LOGGED:
+            debug_log("Using system sqlite3", once_only=True, key="sqlite_system")
+            _SQLITE_LOGGED = True
+
+# STEP 4: Regular imports
+import streamlit as st
+import time
+import datetime
+
+# Import RAG system
 from rag_system import RAGSystem
 
 # Safe import for compliance features
@@ -23,6 +99,7 @@ try:
     COMPLIANCE_FEATURES_AVAILABLE = True
 except ImportError:
     COMPLIANCE_FEATURES_AVAILABLE = False
+    debug_log("Compliance features not available")
 
 # Page configuration
 st.set_page_config(
@@ -32,104 +109,1865 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ENHANCED FEATURES: Auto-complete question database
-COMMON_QUESTIONS = [
-    "How do we prepare for an Ofsted inspection?",
-    "What are the requirements for staff training?",
-    "How do we develop a care plan for a new child?",
-    "What's the best approach to managing challenging behavior?",
-    "How do we implement safeguarding procedures?",
-    "What documentation is required for children's homes?",
-    "How do we support children with trauma?",
-    "What are the fire safety requirements?",
-    "How do we manage staff retention and recruitment?",
-    "What budget planning considerations should we include?",
-    "How do we create therapeutic environments?",
-    "What are the education support requirements?",
-    "How do we handle complaints and concerns?",
-    "What's required for medication management?",
-    "How do we support care leavers transitioning?",
-    "What are the room standards and personalisation requirements?",
-    "How do we manage relationships with social workers?",
-    "What training is required for new staff?",
-    "How do we implement positive behavior support?",
-    "What are the requirements for recording and reporting?",
-    "What are the quality standards for children's homes according to Ofsted?",
-    "How do we improve our Ofsted rating from Good to Outstanding?",
-    "What are the staffing requirements for children's homes?",
-    "How do we handle financial management and budgeting?",
-    "What policies and procedures do we need?"
-]
+# ===== AUTHENTICATION SYSTEM =====
 
-def get_contextual_tip(current_input=""):
-    """ENHANCED FEATURE: Provide dynamic contextual tips based on user input."""
-    tips = [
-        "💡 **Tip:** Include specific details like ages, timelines, or current challenges for more targeted advice",
-        "💡 **Tip:** Mention your current Ofsted rating if asking about improvements or inspections",
-        "💡 **Tip:** Include the number of children and staff when asking about operational questions",
-        "💡 **Tip:** Specify if you're asking about a particular child's needs or general policy guidance",
-        "💡 **Tip:** Mention any deadlines or urgent timescales to get prioritized recommendations"
-    ]
+def get_tester_credentials():
+    """Get tester credentials with fallback system"""
+    try:
+        # Try Streamlit Cloud secrets first
+        testers = st.secrets.get("testers", {})
+        if testers:
+            return testers
+    except Exception as e:
+        print(f"DEBUG: Secrets access failed: {e}")
     
-    # Context-aware tips based on input content
-    if "ofsted" in current_input.lower() or "inspection" in current_input.lower():
-        return "💡 **Tip:** Mention your current rating and inspection timeline for more specific preparation guidance"
-    elif "child" in current_input.lower() or "young person" in current_input.lower():
-        return "💡 **Tip:** Include the child's age, specific needs, or challenges for more personalized guidance"
-    elif "staff" in current_input.lower():
-        return "💡 **Tip:** Specify staff roles, experience levels, or specific training needs for targeted advice"
-    elif "budget" in current_input.lower() or "cost" in current_input.lower():
-        return "💡 **Tip:** Include your home size, capacity, or specific financial challenges for relevant guidance"
-    elif "draft" in current_input.lower() or "write" in current_input.lower():
-        return "💡 **Tip:** Provide context about the purpose, audience, and key points you want to include"
-    else:
-        return tips[len(current_input) % len(tips)]
+    # Fallback for local development
+    return {
+        "DEMO001": {
+            "password": "DemoAccess2024!",
+            "name": "Demo Tester",
+            "email": "demo@example.com",
+            "expires": "2025-12-31"
+        },
+        "TEST001": {
+            "password": "TestAccess456!",
+            "name": "Beta Tester 1", 
+            "email": "tester1@example.com",
+            "expires": "2025-12-31"
+        }
+    }
 
-def get_question_suggestions(input_text):
-    """ENHANCED FEATURE: Auto-complete suggestions based on user input."""
-    if len(input_text) < 3:
-        return []
+def check_session_valid():
+    """Check if current session is still valid"""
+    if not st.session_state.get('authenticated_tester', False):
+        return False
     
-    input_lower = input_text.lower()
-    suggestions = []
+    # Check session timeout (2 hours)
+    session_start = st.session_state.get('session_start', 0)
+    current_time = time.time()
+    session_duration = current_time - session_start
     
-    for question in COMMON_QUESTIONS:
-        if any(word in question.lower() for word in input_lower.split()):
-            suggestions.append(question)
-        if len(suggestions) >= 5:
-            break
+    if session_duration > 7200:  # 2 hours
+        st.session_state['authenticated_tester'] = False
+        return False
     
-    return suggestions
+    return True
 
-# Initialize RAG system
+def log_tester_activity(tester_id, action, details=""):
+    """Log tester activity with completely clean output"""
+    try:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = {
+            "timestamp": timestamp,
+            "tester_id": tester_id or "anonymous",
+            "action": action,
+            "details": details
+        }
+        
+        # Store in session state
+        if 'activity_log' not in st.session_state:
+            st.session_state['activity_log'] = []
+        
+        st.session_state['activity_log'].append(log_entry)
+        
+        # Only log the most important user actions - nothing else
+        critical_actions = [
+            'successful_login', 'failed_login', 'logout',
+            'system_error', 'feedback_submitted'
+        ]
+        
+        # Only show critical actions or when in debug mode
+        if action in critical_actions:
+            print(f"TESTER: {timestamp} - {tester_id or 'anonymous'} - {action}")
+            if action == 'system_error' and details:
+                print(f"  └─ {details}")
+        elif os.getenv('DEBUG_MODE', 'false').lower() == 'true':
+            print(f"DEBUG: {timestamp} - {tester_id or 'anonymous'} - {action}")
+            if details:
+                print(f"  └─ {details}")
+        
+    except Exception as e:
+        # Silent fallback - don't spam with log errors
+        pass
+
+def validate_and_authenticate(tester_id, access_code):
+    """Validate credentials and set up authenticated session"""
+    try:
+        if not tester_id or not access_code:
+            return False
+        
+        # Get valid credentials
+        valid_testers = get_tester_credentials()
+        
+        # Check if tester exists and password matches
+        if tester_id not in valid_testers:
+            return False
+        
+        tester_info = valid_testers[tester_id]
+        if tester_info.get("password") != access_code:
+            return False
+        
+        # Check expiration
+        expiry_date = tester_info.get("expires", "2099-12-31")
+        try:
+            expiry = datetime.datetime.strptime(expiry_date, "%Y-%m-%d").date()
+            if datetime.date.today() > expiry:
+                return False
+        except:
+            pass  # Allow access if date parsing fails
+        
+        # Set up authenticated session
+        st.session_state['authenticated_tester'] = True
+        st.session_state['tester_id'] = tester_id
+        st.session_state['tester_info'] = tester_info
+        st.session_state['session_start'] = time.time()
+        
+        # Log successful authentication
+        log_tester_activity(tester_id, "successful_login", f"User: {tester_info.get('name', 'Unknown')}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"ERROR: Authentication failed: {e}")
+        return False
+
+def show_login_interface():
+    """Streamlined login interface"""
+    st.markdown("""
+    <style>
+    .login-container {
+        max-width: 600px;
+        margin: 2rem auto;
+        padding: 2rem;
+        background: #f8f9fa;
+        border-radius: 10px;
+        border: 1px solid #e9ecef;
+    }
+    .login-header {
+        text-align: center;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="login-container">', unsafe_allow_html=True)
+    
+    # Header
+    st.markdown("""
+    <div class="login-header">
+        <h1>🏠 Children's Home Management System</h1>
+        <h3>Beta Testing Portal</h3>
+        <p>Secure access for authorized testers</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Login form
+    st.markdown("### 🔐 Tester Login")
+    
+    tester_id = st.text_input(
+        "Tester ID:",
+        placeholder="e.g., DEMO001",
+        help="Your unique tester identifier"
+    )
+    
+    access_code = st.text_input(
+        "Access Code:",
+        type="password",
+        placeholder="Enter your access code",
+        help="Secure password provided with your Tester ID"
+    )
+    
+    # Login button
+    if st.button("🚀 Start Testing Session", type="primary", use_container_width=True):
+        if validate_and_authenticate(tester_id, access_code):
+            st.success("✅ Authentication successful!")
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error("❌ Invalid credentials. Please verify your Tester ID and Access Code.")
+            log_tester_activity(tester_id or "unknown", "failed_login", "Invalid credentials")
+    
+    # Info section
+    with st.expander("ℹ️ Testing Information"):
+        st.markdown("""
+        **Session Details:**
+        - Duration: 2 hours per session
+        - Auto-logout after inactivity
+        - Activity logging for improvement
+        
+        **Need Access?**
+        Contact the administrator to receive your testing credentials.
+        """)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def show_session_info():
+    """Show session information in sidebar"""
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 👤 Session Info")
+        
+        tester_info = st.session_state.get('tester_info', {})
+        st.write(f"**Tester:** {tester_info.get('name', 'Unknown')}")
+        st.write(f"**ID:** {st.session_state.get('tester_id', 'N/A')}")
+        
+        # Session timer
+        session_start = st.session_state.get('session_start', time.time())
+        elapsed = time.time() - session_start
+        remaining = max(0, 7200 - elapsed)
+        
+        hours = int(remaining // 3600)
+        minutes = int((remaining % 3600) // 60)
+        st.write(f"**Time remaining:** {hours}h {minutes}m")
+        
+        # Logout button
+        if st.button("🚪 End Session", type="secondary"):
+            log_tester_activity(st.session_state.get('tester_id', 'unknown'), "logout")
+            
+            # Clear session
+            for key in ['authenticated_tester', 'tester_id', 'tester_info', 'session_start']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            
+            st.rerun()
+
+def require_authentication():
+    """Main authentication function"""
+    if check_session_valid():
+        show_session_info()
+        return True
+    
+    # Clear invalid session data
+    st.session_state['authenticated_tester'] = False
+    show_login_interface()
+    return False
+
+# ===== ENVIRONMENT SETUP =====
+
+def setup_environment_variables():
+    """Set up environment variables with one-time logging"""
+    global _ENV_SETUP_LOGGED
+    
+    try:
+        # Get API keys from secrets
+        api_keys = st.secrets.get("api_keys", {})
+        openai_key = api_keys.get("openai")
+        google_key = api_keys.get("google")
+        
+        # Set OpenAI key
+        if openai_key:
+            os.environ['OPENAI_API_KEY'] = openai_key
+            if not _ENV_SETUP_LOGGED:
+                debug_log("OpenAI API key configured", once_only=True, key="openai_setup")
+        
+        # Set Google key with additional gRPC suppression
+        if google_key:
+            os.environ['GOOGLE_API_KEY'] = google_key
+            # Additional Google/gRPC environment variables
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = ''
+            os.environ['GRPC_POLL_STRATEGY'] = 'poll'
+            os.environ['GRPC_ENABLE_FORK_SUPPORT'] = '0'
+            if not _ENV_SETUP_LOGGED:
+                debug_log("Google API key configured", once_only=True, key="google_setup")
+        
+        # Mark as logged
+        _ENV_SETUP_LOGGED = True
+        
+        # Verify at least one key is available
+        if not (openai_key or google_key):
+            debug_log("WARNING: No API keys found in secrets")
+            return False
+            
+        return True
+        
+    except Exception as e:
+        debug_log(f"Environment setup failed: {e}")
+        return False
+
+# ===== RAG SYSTEM INITIALIZATION =====
+
 @st.cache_resource
 def initialize_rag_system():
-    """Initialize and cache the RAG system."""
+    """Initialize RAG system with one-time logging"""
+    debug_log("Initializing RAG system...", once_only=True, key="rag_init_start")
+    
+    # Fix asyncio issues silently
     try:
-        return RAGSystem()
+        import asyncio
+        
+        # Additional threading environment variables for gRPC
+        os.environ['GRPC_ENABLE_FORK_SUPPORT'] = '0'
+        os.environ['GRPC_POLL_STRATEGY'] = 'poll'
+        
+        # Standard asyncio fixes
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                asyncio.set_event_loop(asyncio.new_event_loop())
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+        
+        # Windows-specific policy
+        if sys.platform.startswith('win'):
+            if hasattr(asyncio, 'WindowsProactorEventLoopPolicy'):
+                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        
+        debug_log("Asyncio configured", once_only=True, key="asyncio_config")
+        
     except Exception as e:
-        st.error(f"Failed to initialize RAG System: {e}")
+        debug_log(f"Asyncio configuration failed: {e}")
+    
+    try:
+        # Try to initialize RAG system
+        rag_system = RAGSystem()
+        debug_log("RAG system initialized successfully", once_only=True, key="rag_init_success")
+        return rag_system
+        
+    except Exception as e:
+        debug_log(f"RAG system initialization failed: {e}")
+        
+        # Provide helpful error information only in debug mode
+        error_msg = str(e).lower()
+        if "api" in error_msg or "key" in error_msg:
+            debug_log("HINT: Check API key configuration")
+        elif "import" in error_msg or "module" in error_msg:
+            debug_log("HINT: Check dependencies installation")
+        elif "connection" in error_msg or "network" in error_msg:
+            debug_log("HINT: Check internet connection")
+        
         return None
 
-# ENHANCED INITIALIZATION with proper error handling
-if 'rag_system' not in st.session_state:
-    with st.spinner("Initializing comprehensive guidance system..."):
-        st.session_state.rag_system = initialize_rag_system()
+# ===== PERFORMANCE MODE SELECTOR =====
 
-if st.session_state.rag_system is None:
-    st.error("❌ System initialization failed. Please refresh the page.")
-    st.stop()
+def add_performance_mode_selector():
+    """Add performance mode selector to sidebar"""
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### ⚡ Performance Settings")
+        
+        mode_descriptions = {
+            "fast": "🚀 Fast (2-4 docs, ~5s response)",
+            "balanced": "⚖️ Balanced (3-7 docs, ~8s response)", 
+            "comprehensive": "🔍 Comprehensive (5-12 docs, ~15s response)"
+        }
+        
+        current_mode = st.session_state.get('performance_mode', 'balanced')
+        
+        selected_mode = st.selectbox(
+            "Response Mode:",
+            ["fast", "balanced", "comprehensive"],
+            index=["fast", "balanced", "comprehensive"].index(current_mode),
+            format_func=lambda x: mode_descriptions[x],
+            help="Choose speed vs comprehensiveness trade-off"
+        )
+        
+        st.session_state['performance_mode'] = selected_mode
+        
+        # Show mode description
+        if selected_mode == "fast":
+            st.caption("⚡ Optimized for speed. Best for simple, factual questions.")
+        elif selected_mode == "balanced":
+            st.caption("⚖️ Good balance of speed and completeness. Recommended for most queries.")
+        else:
+            st.caption("🔍 Maximum thoroughness. Best for complex strategic questions.")
+        
+        return selected_mode
 
-# ENHANCED CSS for professional appearance
-st.markdown("""
-<style>
+
+# ===== QUESTION HANDLING FUNCTIONS =====
+
+def show_question_form():
+    """Display the question input form (always visible when no answer)"""
+    st.subheader("💬 Ask Your Question")
+    
+    # Initialize question state
+    if 'current_question' not in st.session_state:
+        st.session_state.current_question = ""
+    
+    # Handle quick question selection
+    if hasattr(st.session_state, 'quick_question'):
+        st.session_state.current_question = st.session_state.quick_question
+        delattr(st.session_state, 'quick_question')
+    
+    # Question input
+    user_question = st.text_area(
+        "Describe your situation or question:",
+        value=st.session_state.current_question,
+        placeholder="Start typing your question... (e.g., 'How do we prepare for an Ofsted inspection?')",
+        height=120,
+        key="question_input"
+    )
+    
+    # Submit button
+    if st.button("🧠 Get Expert Guidance", type="primary", use_container_width=True):
+        if user_question and user_question.strip():
+            # Store the question that was asked
+            st.session_state['last_asked_question'] = user_question
+            process_question(user_question)
+        else:
+            st.warning("⚠️ Please enter a question to receive guidance")
+    
+    # Quick actions
+    show_quick_actions()
+    
+    # Contextual tip
+    tip = get_contextual_tip(user_question)
+    st.markdown(f'<div class="contextual-tip">{tip}</div>', unsafe_allow_html=True)
+
+def show_quick_actions():
+    """Display quick action buttons"""
+    st.markdown("---")
+    st.subheader("🚀 Quick Actions")
+    
+    quick_actions = {
+        "🚨 Inspection Prep": "We have an upcoming Ofsted inspection. What should we focus on to ensure we're fully prepared?",
+        "💰 Budget Planning": "Help us develop an effective budget strategy for the upcoming financial year.",
+        "👥 Staff Issues": "We're experiencing staff retention challenges. What strategies can we implement?",
+        "🏠 New Admission": "We're admitting a new child. What processes should we prioritize for a successful transition?",
+        "📋 Policy Review": "We need to review and update our policies. What current best practices should we include?",
+        "🎯 Quality Improvement": "We want to enhance our care quality and move towards outstanding. What should we focus on?"
+    }
+    
+    cols = st.columns(3)
+    for i, (action, question) in enumerate(quick_actions.items()):
+        with cols[i % 3]:
+            if st.button(action, key=f"quick_{i}", use_container_width=True):
+                st.session_state.quick_question = question
+                log_tester_activity(
+                    st.session_state.get('tester_id', 'unknown'),
+                    "quick_action_used",
+                    f"Action: {action}"
+                )
+                st.rerun()
+
+def get_contextual_tip(current_input=""):
+    """Enhanced contextual tips including performance tips"""
+    if not current_input:
+        return "💡 **Tip:** Use the ⚡ Performance Settings in the sidebar - Fast mode for quick answers, Comprehensive for detailed analysis!"
+    
+    input_lower = current_input.lower()
+    
+    # Check for potentially slow queries
+    if len(current_input) > 200:
+        return "⚡ **Performance Tip:** Long questions work best in Comprehensive mode. For faster responses, try Fast mode."
+    
+    if "ofsted" in input_lower or "inspection" in input_lower:
+        return "💡 **Tip:** Inspection questions work great in Balanced mode for good speed and thorough coverage."
+    elif any(word in input_lower for word in ["comprehensive", "detailed", "analysis", "strategy"]):
+        return "🔍 **Performance Tip:** Complex questions get better results in Comprehensive mode."
+    elif any(word in input_lower for word in ["what is", "define", "list"]):
+        return "🚀 **Performance Tip:** Simple questions work great in Fast mode for quicker responses!"
+    else:
+        tips = [
+            "💡 **Tip:** Adjust ⚡ Performance Settings based on your time/detail needs",
+            "⚡ **Speed Tip:** Fast mode gives good answers in under 5 seconds",
+            "🔍 **Quality Tip:** Use Comprehensive mode for complex questions"
+        ]
+        return tips[len(current_input) % len(tips)]
+
+def handle_question_tab():
+    """Handle the question asking tab - FIXED VERSION that always shows question form"""
+    
+    # If there's a current result, show it first
+    if 'current_result' in st.session_state and st.session_state.current_result:
+        show_current_result_inline()
+        
+        # Add spacing and section for new question
+        st.markdown("---")
+        st.markdown("### 🆕 Ask Another Question")
+    
+    # ALWAYS show the question form (this was missing!)
+    show_question_form()
+
+def show_current_result_inline():
+    """Display the current result with clean interface"""
+    
+    # Show the question that was asked
+    if 'last_asked_question' in st.session_state:
+        st.markdown("### 🤔 Your Question:")
+        st.info(st.session_state['last_asked_question'])
+    
+    st.subheader("🧠 Expert Guidance")
+    
+    # Show model attribution if available
+    if 'model_used' in st.session_state and st.session_state.model_used:
+        st.caption(f'*Response by {st.session_state.model_used}*')
+    
+    # The main answer - clean and prominent
+    st.write(st.session_state.current_result["answer"])
+    
+    # Action buttons
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button("🔄 Ask New Question", type="primary"):
+            clear_current_result()
+    
+    with col2:
+        if st.button("✏️ Edit & Resubmit"):
+            # Keep result but show question form for editing
+            st.session_state.show_edit_form = True
+    
+    with col3:
+        if st.button("📋 Key Actions"):
+            st.session_state.show_actions = not st.session_state.get('show_actions', False)
+    
+    with col4:
+        if st.button("📚 Sources"):
+            st.session_state.show_sources = not st.session_state.get('show_sources', False)
+    
+    # Show edit form if requested
+    if st.session_state.get('show_edit_form', False):
+        st.markdown("---")
+        show_compact_question_form()
+    
+    # Progressive disclosure
+    if st.session_state.get('show_actions', False):
+        st.markdown("---")
+        st.markdown("**📋 Recommended Actions:**")
+        st.markdown("""
+        • **Review** these recommendations with your management team
+        • **Plan implementation** with realistic timelines  
+        • **Monitor progress** and evaluate outcomes regularly
+        """)
+    
+    # CLEAN SOURCES SECTION (Option 4 - Expandable Clean List)
+    if st.session_state.get('show_sources', False) and st.session_state.current_result.get("source_documents"):
+        st.markdown("---")
+        doc_count = len(st.session_state.current_result["source_documents"])
+        st.markdown(f"**📚 Reference Sources** ({doc_count} documents)")
+        
+        # Improved document identification
+        source_types = []
+        for i, doc in enumerate(st.session_state.current_result["source_documents"], 1):
+            # Look at more content and check multiple indicators
+            content = doc.page_content[:500].lower()  # Increased from 150 to 500
+            
+            # More comprehensive document type detection
+            if any(keyword in content for keyword in ["children's homes regulations", "regulation", "the children's homes"]):
+                doc_type = "Children's Homes Regulations"
+            elif any(keyword in content for keyword in ["quality standards", "standard", "quality framework"]):
+                doc_type = "Quality Standards Framework"
+            elif any(keyword in content for keyword in ["ofsted", "inspection", "inspector", "inspection framework"]):
+                doc_type = "Ofsted Inspection Guidelines"
+            elif any(keyword in content for keyword in ["guide to", "guidance", "guide", "april 2015"]):
+                doc_type = "Official Guidance Document"
+            elif any(keyword in content for keyword in ["childrenscommissioner", "commissioner", "cco-"]):
+                doc_type = "Children's Commissioner Report"
+            elif any(keyword in content for keyword in ["safeguarding", "protection", "harm"]):
+                doc_type = "Safeguarding Guidelines"
+            elif any(keyword in content for keyword in ["education", "skills", "learning"]):
+                doc_type = "Education Standards"
+            elif any(keyword in content for keyword in ["wellbeing", "well-being", "health"]):
+                doc_type = "Health & Wellbeing Standards"
+            elif "http" in content or "www" in content or ".pdf" in content:
+                doc_type = "Online Resource/Report"
+            else:
+                # Try to extract a meaningful title from the beginning
+                first_line = doc.page_content.split('\n')[0].strip()
+                if len(first_line) > 10 and len(first_line) < 100:
+                    doc_type = first_line
+                else:
+                    doc_type = "Regulatory Documentation"
+            
+            source_types.append(f"**{i}.** {doc_type}")
+        
+        # Display as clean numbered list
+        st.markdown("\n".join(source_types))
+        
+        # Optional: Add expandable details
+        with st.expander("📋 View Source Details", expanded=False):
+            for i, doc in enumerate(st.session_state.current_result["source_documents"], 1):
+                st.markdown(f"**Source {i}:**")
+                
+                # Show first line as title if it looks like a title
+                first_line = doc.page_content.split('\n')[0].strip()
+                if len(first_line) > 10 and len(first_line) < 200:
+                    st.markdown(f"*{first_line}*")
+                
+                # Show preview
+                preview = doc.page_content[:300] + "..." if len(doc.page_content) > 300 else doc.page_content
+                st.text(preview)
+                
+                if i < len(st.session_state.current_result["source_documents"]):
+                    st.markdown("---")
+
+def show_compact_question_form():
+    """Show a compact question form for editing/new questions"""
+    st.markdown("### ✏️ Edit Your Question")
+    
+    # Pre-fill with the last asked question
+    current_question = st.session_state.get('last_asked_question', '')
+    
+    user_question = st.text_area(
+        "Modify your question or ask a new one:",
+        value=current_question,
+        height=100,
+        key="edit_question_input"
+    )
+    
+    # Buttons in columns
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("🧠 Get New Answer", type="primary", use_container_width=True):
+            if user_question and user_question.strip():
+                st.session_state['last_asked_question'] = user_question
+                st.session_state.show_edit_form = False  # Hide the edit form
+                process_question(user_question)
+            else:
+                st.warning("⚠️ Please enter a question")
+    
+    with col2:
+        if st.button("❌ Cancel Edit", use_container_width=True):
+            st.session_state.show_edit_form = False
+    
+    with col3:
+        if st.button("🔄 Start Fresh", use_container_width=True):
+            clear_current_result()
+
+def clear_current_result():
+    """Clear current result and return to question form"""
+    for key in ['current_result', 'model_used', 'show_actions', 'show_sources', 'last_asked_question', 'show_edit_form']:
+        if key in st.session_state:
+            del st.session_state[key]
+    # Clear the current_question to start fresh
+    st.session_state.current_question = ""
+
+# ===== END QUESTION HANDLING FUNCTIONS =====
+
+# ===== QUESTION PROCESSING =====
+
+def process_question(user_question):
+    """Process the user's question with clean, minimal progress indicators"""
+    # Get performance mode from user selection
+    performance_mode = st.session_state.get('performance_mode', 'balanced')
+    
+    start_time = time.time()
+    
+    log_tester_activity(
+        st.session_state.get('tester_id', 'unknown'),
+        "question_submitted",
+        f"Mode: {performance_mode}, Question: {user_question[:50]}..."
+    )
+    
+    progress_container = st.empty()
+    status_container = st.empty()
+    
+    try:
+        # Clean progress indicators - no mode references
+        with progress_container.container():
+            progress_bar = st.progress(20)
+        with status_container.container():
+            st.info("🔍 Analyzing your question...")
+        time.sleep(0.3)
+        
+        with progress_container.container():
+            progress_bar = st.progress(60)
+        with status_container.container():
+            st.info("📚 Gathering relevant information...")
+        
+        # Use adaptive RAG system if available
+        if hasattr(st.session_state.rag_system, 'query_with_performance_mode'):
+            result = st.session_state.rag_system.query_with_performance_mode(
+                user_question, 
+                performance_mode
+            )
+        else:
+            # Fallback to standard processing
+            retriever = st.session_state.rag_system.get_current_retriever()
+            docs = retriever.invoke(user_question)
+            context = "\n\n".join([doc.page_content for doc in docs])
+            enhanced_question = enhance_question_based_on_intent(user_question)
+            
+            result = st.session_state.rag_system.query(
+                user_question=enhanced_question,
+                context_text=context,
+                source_docs=docs
+            )
+        
+        with progress_container.container():
+            progress_bar = st.progress(100)
+        with status_container.container():
+            st.success("✅ Response ready!")
+        
+        time.sleep(1)
+        progress_container.empty()
+        status_container.empty()
+        
+        if result and result.get("answer"):
+            st.session_state.current_result = result
+            st.session_state.current_question = user_question
+            
+            # Store model info if available
+            if result.get("metadata") and result["metadata"].get("llm_used"):
+                st.session_state.model_used = result["metadata"]["llm_used"]
+            
+            total_time = time.time() - start_time
+            log_tester_activity(
+                st.session_state.get('tester_id', 'unknown'),
+                "successful_response",
+                f"Mode: {performance_mode}, Time: {total_time:.1f}s"
+            )
+
+            st.rerun()
+            
+        else:
+            st.error("❌ Sorry, I couldn't generate a response.")
+            log_tester_activity(
+                st.session_state.get('tester_id', 'unknown'),
+                "failed_response",
+                f"Mode: {performance_mode}, No response generated"
+            )
+            
+    except Exception as e:
+        total_time = time.time() - start_time
+        progress_container.empty()
+        status_container.empty()
+        
+        st.error("❌ An error occurred while processing your question.")
+        log_tester_activity(
+            st.session_state.get('tester_id', 'unknown'),
+            "system_error",
+            f"Mode: {performance_mode}, Error: {str(e)[:100]}"
+        )
+        
+        with st.expander("🔧 Error Details"):
+            st.code(f"Error: {str(e)}")
+            st.markdown("**💡 Try refreshing the page or rephrasing your question.**")
+
+def enhance_question_based_on_intent(user_question):
+    """Enhance question based on detected intent"""
+    question_lower = user_question.lower()
+    
+    # Creation/drafting requests
+    creation_indicators = ["draft", "write", "create", "develop a", "make a", "compose"]
+    
+    # Factual/informational questions
+    factual_indicators = ["what are", "what is", "list", "define", "explain", "describe"]
+    
+    # Strategic guidance requests
+    strategic_indicators = ["how do we", "how can we", "what should we", "strategy for"]
+    
+    is_creation = any(indicator in question_lower for indicator in creation_indicators)
+    is_factual = any(indicator in question_lower for indicator in factual_indicators)
+    is_strategic = any(indicator in question_lower for indicator in strategic_indicators)
+    
+    if is_creation:
+        return f"""
+        Create the specific deliverable requested by the user. Provide actual content they can use directly.
+        
+        Request: {user_question}
+        
+        Format as a ready-to-use deliverable with professional structure and complete content.
+        """
+    elif is_factual and not is_strategic:
+        return f"""
+        Question: {user_question}
+        
+        Provide comprehensive factual information including:
+        1. Complete standards/requirements
+        2. Specific regulations and numbers
+        3. Clear explanations and details
+        4. Key requirements for practitioners
+        
+        Focus on accuracy and completeness.
+        """
+    else:
+        return f"""
+        As a senior children's home consultant, provide strategic guidance for:
+        
+        Question: {user_question}
+        
+        Include:
+        1. Strategic considerations
+        2. Implementation steps with timelines
+        3. Risk management strategies
+        4. Child-centered impact assessment
+        5. Resource requirements
+        6. Success metrics
+        7. Actionable recommendations
+        """
+
+# ============================================================================
+# ENHANCED DOCUMENT ANALYSIS FUNCTIONS
+# ============================================================================
+
+def handle_document_analysis_tab():
+    """Enhanced document analysis tab - FIXED to hide interface after analysis"""
+    
+    # Check if we have document analysis results
+    if 'document_analysis_result' in st.session_state and st.session_state.document_analysis_result:
+        show_document_analysis_result()
+        
+        # Add spacing and section for new analysis
+        st.markdown("---")
+        st.markdown("### 🆕 Analyze New Documents")
+        
+        # Show button to clear results and start new analysis
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📄 Analyze Different Documents", type="primary", use_container_width=True, key="doc_analyze_different"):
+                clear_document_analysis_result()
+                st.rerun()
+        
+        with col2:
+            if st.button("🔄 Start Fresh", use_container_width=True, key="doc_start_fresh"):
+                clear_document_analysis_result()
+                st.rerun()
+        
+        # REMOVED: Don't show the upload interface in expander when results exist
+        # This was causing the interface to still be visible
+        
+        return  # Exit early - don't show upload interface
+    
+    # Show normal interface if no results (moved to top)
+    show_document_upload_interface()
+
+def show_document_upload_interface():
+    """Show the document upload and analysis interface - FIXED KEYS"""
+    st.subheader("📄 Document Analysis & Processing")
+    st.markdown("Upload documents for comprehensive analysis, extraction, and Q&A.")
+    
+    # 1. CUSTOM ANALYSIS FOCUS - with unique key prefix
+    custom_focus = st.text_area(
+        "🎯 Custom Analysis Focus (optional):",
+        placeholder="e.g., 'Focus on safeguarding policies and compliance requirements'",
+        height=80,
+        help="Specify what aspects you want the analysis to focus on",
+        key="doc_tab_custom_focus"  # Added doc_tab_ prefix
+    )
+    
+    # 2. Analysis type selection - with unique key prefix
+    analysis_type = st.selectbox(
+        "📋 Analysis Type:",
+        [
+            "📊 Comprehensive Analysis",
+            "✅ Compliance Check", 
+            "📝 Content Summary",
+            "🔍 Key Information Extraction",
+            "❓ Document Q&A",
+            "📈 Policy Gap Analysis"
+        ],
+        help="Choose the type of analysis you need",
+        key="doc_tab_analysis_type"  # Added doc_tab_ prefix
+    )
+    
+    # 3. File upload - with unique key prefix
+    uploaded_files = st.file_uploader(
+        "Upload Documents",
+        type=['pdf', 'docx', 'txt', 'md'],
+        accept_multiple_files=True,
+        help="Supports PDF, Word, Text, and Markdown files",
+        key="doc_tab_uploader"  # Added doc_tab_ prefix
+    )
+    
+    # Show the analyze button immediately after the file uploader
+    if uploaded_files:
+        # Place a horizontal line for visual separation
+        st.markdown("---")
+        
+        # THE ANALYZE BUTTON - with unique key prefix
+        if st.button("🔍 Analyze Documents", type="primary", use_container_width=True, key="doc_tab_analyze_btn"):
+            analyze_documents(
+                uploaded_files, 
+                analysis_type, 
+                custom_focus,
+                {
+                    'metadata': True,
+                    'tables': True,
+                    'contradictions': False,
+                    'compare': len(uploaded_files) > 1
+                }
+            )
+        
+        st.markdown("---")
+        
+        # Show file details below the button
+        st.markdown("### 📁 Uploaded Files")
+        for i, file in enumerate(uploaded_files):
+            col1, col2, col3 = st.columns([3, 1, 1])
+            with col1:
+                st.write(f"**{file.name}** ({file.size/1024:.1f} KB)")
+            with col2:
+                st.write(file.type)
+            with col3:
+                st.write(f"File {i+1}")
+
+def show_document_analysis_result():
+    """Display document analysis results with clean interface"""
+    
+    result = st.session_state.document_analysis_result
+    
+    # Show what was analyzed
+    st.markdown("### 📄 Document Analysis Complete")
+    
+    if 'analysis_metadata' in st.session_state:
+        metadata = st.session_state.analysis_metadata
+        st.info(f"✅ Analyzed {metadata.get('file_count', 1)} document(s) using {metadata.get('analysis_type', 'Analysis')}")
+    
+    # Main analysis result
+    st.subheader("📋 Analysis Report")
+    st.write(result['answer'])
+    
+    # Action buttons
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("📋 Key Findings"):
+            st.session_state.show_doc_findings = not st.session_state.get('show_doc_findings', False)
+    
+    with col2:
+        if st.button("📄 Generate Report"):
+            generate_document_report(result)
+    
+    with col3:
+        if st.button("📚 Source Details"):
+            st.session_state.show_doc_sources = not st.session_state.get('show_doc_sources', False)
+    
+    # Progressive disclosure
+    if st.session_state.get('show_doc_findings', False):
+        st.markdown("---")
+        st.markdown("**📋 Key Findings Summary:**")
+        st.markdown("""
+        • **Review** the analysis findings with your team
+        • **Implement** recommended improvements
+        • **Monitor** compliance gaps identified
+        • **Follow up** on action items specified
+        """)
+    
+    if st.session_state.get('show_doc_sources', False) and 'analysis_metadata' in st.session_state:
+        st.markdown("---")
+        metadata = st.session_state.analysis_metadata
+        if metadata.get('processed_docs'):
+            st.markdown("**📁 Analyzed Documents:**")
+            for i, doc in enumerate(metadata['processed_docs'], 1):
+                st.write(f"**{i}.** {doc['filename']} ({doc['word_count']:,} words)")
+
+
+def analyze_documents(files, analysis_type, custom_focus, options):
+    """Process and analyze uploaded documents"""
+    progress_container = st.empty()
+    status_container = st.empty()
+    
+    try:
+        # Step 1: Process files
+        with progress_container.container():
+            progress_bar = st.progress(20)
+        with status_container.container():
+            st.info("📄 Processing uploaded documents...")
+        
+        processed_docs = []
+        for file in files:
+            doc_data = process_single_document(file)
+            if doc_data:
+                processed_docs.append(doc_data)
+        
+        # Step 2: Combine and analyze
+        with progress_container.container():
+            progress_bar = st.progress(60)
+        with status_container.container():
+            st.info("🧠 Performing comprehensive analysis...")
+        
+        # Create analysis prompt based on type
+        analysis_prompt = create_document_analysis_prompt(
+            analysis_type, custom_focus, processed_docs, options
+        )
+        
+        # Get response from RAG system
+        result = st.session_state.rag_system.query_with_performance_mode(
+            analysis_prompt, 
+            st.session_state.get('performance_mode', 'balanced')
+        )
+        
+        # Step 3: Complete
+        with progress_container.container():
+            progress_bar = st.progress(100)
+        with status_container.container():
+            st.success("✅ Analysis complete!")
+        
+        time.sleep(1)
+        progress_container.empty()
+        status_container.empty()
+        
+        st.session_state.document_analysis_result = result
+        st.session_state.analysis_metadata = {
+            'analysis_type': analysis_type,
+            'file_count': len(files),
+            'processed_docs': processed_docs,
+            'custom_focus': custom_focus,
+            'options': options
+        }
+        
+        # Log activity
+        log_tester_activity(
+            st.session_state.get('tester_id', 'unknown'),
+            "document_analysis_completed",
+            f"Type: {analysis_type}, Files: {len(files)}"
+        )
+        
+        # Refresh to show results
+        st.rerun()
+        
+    except Exception as e:
+        progress_container.empty()
+        status_container.empty()
+        st.error("❌ Document analysis failed.")
+        
+        with st.expander("🔧 Error Details"):
+            st.code(f"Error: {str(e)}")
+
+def clear_document_analysis_result():
+    """Clear document analysis results - UPDATED for new keys"""
+    for key in ['document_analysis_result', 'analysis_metadata', 'show_doc_findings', 'show_doc_sources']:
+        if key in st.session_state:
+            del st.session_state[key]
+
+
+def process_single_document(file):
+    """Process a single document and extract content"""
+    try:
+        file_extension = file.name.split('.')[-1].lower()
+        
+        if file_extension == 'pdf':
+            # Use your existing PDF processing
+            content = extract_pdf_content(file)
+        elif file_extension == 'docx':
+            content = extract_docx_content(file)
+        elif file_extension in ['txt', 'md']:
+            content = file.read().decode('utf-8')
+        else:
+            return None
+        
+        return {
+            'filename': file.name,
+            'content': content,
+            'size': file.size,
+            'type': file_extension,
+            'word_count': len(content.split()),
+            'char_count': len(content)
+        }
+        
+    except Exception as e:
+        st.warning(f"Failed to process {file.name}: {str(e)}")
+        return None
+
+def extract_pdf_content(file):
+    """Extract content from PDF file"""
+    try:
+        import PyPDF2
+        pdf_reader = PyPDF2.PdfReader(file)
+        content = ""
+        for page in pdf_reader.pages:
+            content += page.extract_text() + "\n"
+        return content
+    except ImportError:
+        # Fallback to your existing method
+        return "PDF processing requires PyPDF2. Using alternative method..."
+
+def extract_docx_content(file):
+    """Extract content from Word document"""
+    try:
+        import docx
+        doc = docx.Document(file)
+        content = ""
+        for paragraph in doc.paragraphs:
+            content += paragraph.text + "\n"
+        return content
+    except ImportError:
+        return "Word document processing requires python-docx library."
+
+def create_document_analysis_prompt(analysis_type, custom_focus, docs, options):
+    """Create specialized prompt based on analysis type"""
+    
+    # Combine all document content
+    combined_content = "\n\n".join([
+        f"DOCUMENT: {doc['filename']}\n{doc['content']}" 
+        for doc in docs
+    ])
+    
+    base_context = f"Analyze the following documents:\n\n{combined_content}\n\n"
+    
+    if "Comprehensive Analysis" in analysis_type:
+        prompt = f"""{base_context}
+Provide a comprehensive analysis including:
+1. **Executive Summary** - Key findings and overview
+2. **Content Analysis** - Main themes, topics, and structure
+3. **Compliance Assessment** - Regulatory alignment and gaps
+4. **Risk Analysis** - Potential issues and concerns
+5. **Recommendations** - Actionable next steps
+6. **Key Metrics** - Important data points and statistics
+        """
+    
+    elif "Compliance Check" in analysis_type:
+        prompt = f"""{base_context}
+Perform a detailed compliance analysis:
+1. **Regulatory Standards** - Which standards are addressed
+2. **Compliance Gaps** - Missing or insufficient coverage
+3. **Risk Areas** - Potential compliance vulnerabilities
+4. **Required Actions** - Steps to achieve full compliance
+5. **Priority Level** - Urgency of each finding
+        """
+    
+    elif "Content Summary" in analysis_type:
+        prompt = f"""{base_context}
+Create a structured content summary:
+1. **Key Points** - Main messages and findings
+2. **Action Items** - Required tasks and responsibilities
+3. **Deadlines** - Important dates and timelines
+4. **Stakeholders** - People and roles mentioned
+5. **Resources** - Required materials and support
+        """
+    
+    elif "Key Information Extraction" in analysis_type:
+        prompt = f"""{base_context}
+Extract key information in structured format:
+1. **Important Dates** - All dates and deadlines
+2. **Key Personnel** - Names, roles, and responsibilities
+3. **Financial Information** - Costs, budgets, and financial data
+4. **Requirements** - Mandatory actions and standards
+5. **Contact Information** - Phone numbers, emails, addresses
+        """
+    
+    elif "Document Q&A" in analysis_type:
+        prompt = f"""{base_context}
+Based on these documents, provide answers to common questions:
+1. **What are the main objectives?**
+2. **Who is responsible for what?**
+3. **What are the key deadlines?**
+4. **What resources are needed?**
+5. **What are the success criteria?**
+6. **What are the potential risks?**
+        """
+    
+    else:  # Policy Gap Analysis
+        prompt = f"""{base_context}
+Analyze for policy gaps and improvements:
+1. **Current Coverage** - What policies exist
+2. **Missing Policies** - What's not covered
+3. **Outdated Content** - What needs updating
+4. **Best Practice Gaps** - Industry standard comparisons
+5. **Implementation Issues** - Practical challenges
+        """
+    
+    # Add custom focus if provided
+    if custom_focus:
+        prompt += f"\n\nSpecial Focus: {custom_focus}"
+    
+    # Add options-based instructions
+    if options.get('metadata'):
+        prompt += "\n\nInclude document metadata analysis (file info, structure, etc.)"
+    if options.get('tables'):
+        prompt += "\n\nExtract and analyze any tables or structured data"
+    if options.get('contradictions'):
+        prompt += "\n\nIdentify any contradictions or conflicts between documents"
+    if options.get('compare') and len(docs) > 1:
+        prompt += "\n\nCompare documents and highlight differences/similarities"
+    
+    return prompt
+
+def display_document_analysis_results(result, analysis_type, docs, options):
+    """Display comprehensive analysis results"""
+    st.markdown("---")
+    st.subheader("📊 Analysis Results")
+    
+    # Key metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Documents", len(docs))
+    
+    with col2:
+        total_words = sum(doc['word_count'] for doc in docs)
+        st.metric("Total Words", f"{total_words:,}")
+    
+    with col3:
+        total_size = sum(doc['size'] for doc in docs)
+        st.metric("Total Size", f"{total_size/1024:.1f} KB")
+    
+    with col4:
+        response_time = result.get('metadata', {}).get('response_time_ms', 0)
+        st.metric("Analysis Time", f"{response_time/1000:.1f}s")
+    
+    # Main analysis result
+    st.markdown("### 📋 Analysis Report")
+    st.write(result['answer'])
+    
+    # Document details
+    with st.expander("📁 Document Details", expanded=False):
+        for doc in docs:
+            st.markdown(f"**{doc['filename']}**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.write(f"Type: {doc['type'].upper()}")
+            with col2:
+                st.write(f"Words: {doc['word_count']:,}")
+            with col3:
+                st.write(f"Size: {doc['size']/1024:.1f} KB")
+            
+            # Show content preview
+            if st.button(f"Preview {doc['filename']}", key=f"preview_{doc['filename']}"):
+                st.text_area(
+                    f"Content Preview - {doc['filename']}",
+                    doc['content'][:1000] + "..." if len(doc['content']) > 1000 else doc['content'],
+                    height=200,
+                    key=f"content_{doc['filename']}"
+                )
+            st.markdown("---")
+
+def display_system_health():
+    """Display system health and performance information"""
+    st.subheader("⚙️ System Health & Performance")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 🤖 AI Models Status")
+        
+        # Check RAG system health
+        if st.session_state.get('rag_system'):
+            try:
+                health = st.session_state.rag_system.get_system_health()
+                models = health.get('models', {})
+                
+                for model, status in models.items():
+                    status_icon = "✅" if status else "❌"
+                    st.write(f"{status_icon} {model}")
+                    
+            except Exception as e:
+                st.error(f"❌ Health check failed: {e}")
+        else:
+            st.error("❌ RAG System not available")
+        
+        # API Keys status
+        st.markdown("### 🔑 API Configuration")
+        openai_key = bool(os.environ.get("OPENAI_API_KEY"))
+        google_key = bool(os.environ.get("GOOGLE_API_KEY"))
+        
+        st.write(f"{'✅' if openai_key else '❌'} OpenAI API")
+        st.write(f"{'✅' if google_key else '❌'} Google API")
+    
+    with col2:
+        st.markdown("### 📊 Performance Metrics")
+        
+        # Get performance stats
+        if hasattr(st.session_state.rag_system, 'get_performance_stats'):
+            try:
+                perf_stats = st.session_state.rag_system.get_performance_stats()
+                if isinstance(perf_stats, dict) and perf_stats.get('total_queries', 0) > 0:
+                    st.metric("Total Queries", perf_stats['total_queries'])
+                    st.metric("Avg Response Time", f"{perf_stats.get('avg_total_time', 0):.1f}s")
+                    st.metric("Cache Hits", perf_stats.get('cache_hits', 0))
+                else:
+                    st.info("No performance data available yet")
+            except Exception as e:
+                st.warning(f"Performance stats unavailable: {e}")
+        
+        # System resources
+        if SYSTEM_MONITOR:
+            st.markdown("### 💾 System Resources")
+            try:
+                memory_percent = psutil.virtual_memory().percent
+                st.metric("Memory Usage", f"{memory_percent:.1f}%")
+            except Exception as e:
+                st.warning(f"Memory monitoring unavailable: {e}")
+        
+        # Session info
+        st.markdown("### ⏱️ Session Info")
+        session_start = st.session_state.get('session_start', time.time())
+        session_duration = int((time.time() - session_start) / 60)
+        st.metric("Session Duration", f"{session_duration} min")
+    
+    # Additional system information
+    with st.expander("🔍 Detailed System Information"):
+        if st.session_state.get('rag_system'):
+            try:
+                health = st.session_state.rag_system.get_system_health()
+                st.json(health)
+            except Exception as e:
+                st.error(f"Detailed health check failed: {e}")
+
+
+# ============================================================================
+# SIMPLIFIED ENHANCED IMAGE ANALYSIS FUNCTIONS  
+# ============================================================================
+
+def handle_image_tab():
+    """Enhanced image analysis tab - FIXED to hide interface after analysis"""
+    
+    # CHECK FOR EXISTING RESULTS FIRST
+    if 'image_analysis_result' in st.session_state and st.session_state.image_analysis_result:
+        show_enhanced_image_results()
+        
+        # Add spacing and section for new analysis
+        st.markdown("---")
+        st.markdown("### 🆕 Analyze New Images")
+        
+        # Buttons for new analysis with unique keys
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📷 Analyze Different Images", type="primary", use_container_width=True, key="enh_analyze_different"):
+                clear_image_analysis_result()
+                st.rerun()
+        
+        with col2:
+            if st.button("🔄 Start Fresh", use_container_width=True, key="enh_start_fresh"):
+                clear_image_analysis_result()
+                st.rerun()
+        
+        # REMOVED: Don't show upload interface in expander when results exist
+        # This was causing the interface to still be visible
+        
+        return  # Exit early - don't show upload interface
+    
+    # Show upload interface (moved to top)
+    show_simplified_upload_interface()
+
+def show_simplified_upload_interface():
+    """Simplified upload interface - FIXED KEYS"""
+    st.subheader("📷 Visual Analysis")
+    st.markdown("Upload images for clear, actionable analysis and compliance checking.")
+    
+    # 1. CUSTOM FOCUS - with unique key prefix
+    custom_focus = st.text_area(
+        "🎯 Additional Focus (optional):",
+        placeholder="e.g., 'Pay special attention to the dining area setup' or leave blank",
+        height=60,
+        key="img_tab_custom_focus"  # Added img_tab_ prefix
+    )
+    
+    # 2. Analysis focus selection - with unique key prefix
+    analysis_focus = st.selectbox(
+        "🎯 Analysis Focus:",
+        [
+            "🛡️ Safety & Compliance Check",
+            "🏠 Environment Quality Assessment", 
+            "🍎 Food & Kitchen Safety Review",
+            "💚 Wellbeing & Atmosphere Evaluation",
+            "📋 General Facility Inspection"
+        ],
+        help="Choose what you want to focus on",
+        key="img_tab_analysis_select"  # Added img_tab_ prefix
+    )
+    
+    # 3. Detail level - with unique key prefix
+    detail_level = st.radio(
+        "📊 Report Style:",
+        ["🚀 Quick Summary (Key points only)", "📋 Structured Report (Recommended)", "🔍 Detailed Analysis"],
+        index=1,
+        key="img_tab_detail_select"  # Added img_tab_ prefix
+    )
+    
+    # 4. Image upload - with unique key prefix
+    if 'image_uploader_key' not in st.session_state:
+        st.session_state.image_uploader_key = 0
+    
+    uploaded_images = st.file_uploader(
+        "Upload Images (1-3 images recommended)",
+        type=['png', 'jpg', 'jpeg'],
+        accept_multiple_files=True,
+        help="Upload facility photos for analysis",
+        key=f"img_tab_uploader_{st.session_state.image_uploader_key}"  # Added img_tab_ prefix
+    )
+    
+    # Show the analyze button immediately after the file uploader
+    if uploaded_images:
+        # Place a horizontal line for visual separation
+        st.markdown("---")
+        
+        # THE ANALYZE BUTTON - with unique key prefix
+        if st.button("🔍 Analyze Images", type="primary", use_container_width=True, key="img_tab_analyze_btn"):
+            analyze_images_simplified(uploaded_images, analysis_focus, detail_level, custom_focus)
+        
+        st.markdown("---")
+        
+        # Show image preview below the button
+        st.markdown("### 📁 Images Ready for Analysis")
+        st.info(f"📷 {len(uploaded_images)} image(s) uploaded and ready for analysis.")
+        
+        # Show images in expandable section
+        with st.expander("👁️ Preview Uploaded Images", expanded=False):
+            cols = st.columns(min(3, len(uploaded_images)))
+            for i, image in enumerate(uploaded_images):
+                with cols[i % 3]:
+                    st.image(image, caption=f"Image {i+1}", use_container_width=True)
+    
+
+def analyze_images_simplified(images, analysis_focus, detail_level, custom_focus):
+    """Simplified image analysis with cleaner prompts"""
+    
+    progress_container = st.empty()
+    status_container = st.empty()
+    
+    try:
+        # Progress tracking
+        with progress_container.container():
+            progress_bar = st.progress(20)
+        with status_container.container():
+            st.info("📷 Processing uploaded images...")
+        
+        # Create simplified analysis prompt
+        prompt = create_simplified_analysis_prompt(analysis_focus, detail_level, custom_focus, len(images))
+        
+        with progress_container.container():
+            progress_bar = st.progress(60)
+        with status_container.container():
+            st.info("🔍 Conducting visual analysis...")
+        
+        # Process first image (or combine if multiple)
+        image_data = images[0]
+        image_data.seek(0)
+        original_bytes = image_data.read()
+        compressed_bytes = compress_image_for_analysis(original_bytes)
+        
+        # Get analysis result
+        result = st.session_state.rag_system.query_with_performance_mode(
+            prompt,
+            st.session_state.get('performance_mode', 'balanced'),
+            compressed_bytes
+        )
+        
+        with progress_container.container():
+            progress_bar = st.progress(100)
+        with status_container.container():
+            st.success("✅ Analysis complete!")
+        
+        time.sleep(1)
+        progress_container.empty()
+        status_container.empty()
+        
+        if result and result.get('answer'):
+            # Store results
+            st.session_state.image_analysis_result = result
+            st.session_state.image_metadata = {
+                'image_count': len(images),
+                'primary_image': images[0].name,
+                'analysis_focus': analysis_focus,
+                'detail_level': detail_level,
+                'custom_focus': custom_focus
+            }
+            
+            # Clear uploader for next use
+            st.session_state.image_uploader_key += 1
+            
+            # Log activity
+            log_tester_activity(
+                st.session_state.get('tester_id', 'unknown'),
+                "enhanced_image_analysis_completed",
+                f"Images: {len(images)}, Focus: {analysis_focus}"
+            )
+            
+            # CRITICAL FIX: Tell the app to stay on image tab after rerun
+            st.session_state.stay_on_image_tab = True
+
+            # Refresh to show results
+            st.rerun()
+        else:
+            st.error("❌ Analysis failed to produce results. Please try again.")
+            
+    except Exception as e:
+        progress_container.empty()
+        status_container.empty()
+        
+        st.error("❌ Image analysis failed.")
+        
+        with st.expander("🔧 Error Details"):
+            st.code(f"Error: {str(e)}")
+
+def create_simplified_analysis_prompt(analysis_focus, detail_level, custom_focus, image_count):
+    """Create clean, focused analysis prompts"""
+    
+    # Base analysis instructions based on focus
+    focus_instructions = {
+        "🛡️ Safety & Compliance Check": "Focus on health and safety compliance, fire safety, hazard identification, and regulatory requirements.",
+        "🏠 Environment Quality Assessment": "Evaluate the quality of the physical environment, comfort, cleanliness, maintenance, and child-friendly features.",
+        "🍎 Food & Kitchen Safety Review": "Examine food preparation areas, hygiene standards, equipment safety, and food safety compliance.",
+        "💚 Wellbeing & Atmosphere Evaluation": "Assess how the environment supports children's emotional wellbeing, dignity, privacy, and positive atmosphere.",
+        "📋 General Facility Inspection": "Comprehensive visual inspection covering safety, quality, compliance, and child experience."
+    }
+    
+    base_instruction = focus_instructions.get(analysis_focus, "Provide a comprehensive facility analysis.")
+    
+    # Adjust detail level
+    if "Quick Summary" in detail_level:
+        format_instruction = """
+Provide a CONCISE analysis in this format:
+• **Key Strengths:** 2-3 positive observations
+• **Areas for Attention:** 2-3 priority improvements 
+• **Compliance Status:** Brief compliance assessment
+• **Next Steps:** 1-2 immediate actions needed
+        """
+    elif "Detailed Analysis" in detail_level:
+        format_instruction = """
+Provide a COMPREHENSIVE analysis in this format:
+• **Overview:** What you observe in the image(s)
+• **Compliance Assessment:** Detailed regulatory evaluation
+• **Safety Analysis:** Specific safety observations and concerns
+• **Quality Evaluation:** Environment quality and standards
+• **Positive Practices:** Good examples identified
+• **Improvement Areas:** Specific recommendations with rationale
+• **Action Plan:** Prioritized steps for improvement
+        """
+    else:  # Structured Report (default)
+        format_instruction = """
+Provide a STRUCTURED analysis in this format:
+• **Summary:** Brief overview of what you observe
+• **Key Findings:** 3-4 main observations (both positive and areas for improvement)
+• **Compliance Notes:** Important regulatory considerations
+• **Recommendations:** 2-3 actionable next steps
+        """
+    
+    # Add custom focus if provided
+    custom_instruction = f"\n\nAdditional Focus: {custom_focus}" if custom_focus.strip() else ""
+    
+    # Complete prompt
+    return f"""
+Analyze this image for a children's home facility with focus on: {base_instruction}
+
+{format_instruction}
+
+{custom_instruction}
+
+Be specific, practical, and focus on actionable insights for facility managers.
+    """
+
+def show_enhanced_image_results():
+    """Display enhanced image analysis results with clean interface"""
+    
+    result = st.session_state.image_analysis_result
+    metadata = st.session_state.get('image_metadata', {})
+    
+    # Show what was analyzed
+    st.markdown("### 📷 Visual Analysis Complete")
+    
+    analysis_info = f"✅ Analyzed {metadata.get('image_count', 1)} image(s)"
+    if metadata.get('primary_image'):
+        analysis_info += f" • Primary: {metadata.get('primary_image')}"
+    analysis_info += f" • Focus: {metadata.get('analysis_focus', 'General')}"
+    
+    st.info(analysis_info)
+    
+    # Show model attribution if available
+    if result.get('metadata') and result['metadata'].get('llm_used'):
+        st.caption(f'*Analysis by {result["metadata"]["llm_used"]}*')
+    
+    # Main analysis result - CLEAN DISPLAY
+    st.subheader("📋 Visual Analysis Report")
+    st.write(result['answer'])
+    
+    # Action buttons with unique keys
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("🔄 Analyze New Images", type="primary", key="enh_new_analysis"):
+            clear_image_analysis_result()
+    
+    with col2:
+        if st.button("📄 Download Report", key="enh_download_report"):
+            generate_enhanced_image_report(result, metadata)
+    
+    with col3:
+        if st.button("📊 Analysis Details", key="enh_show_details"):
+            st.session_state.show_enh_details = not st.session_state.get('show_enh_details', False)
+    
+    # Progressive disclosure for details
+    if st.session_state.get('show_enh_details', False):
+        st.markdown("---")
+        st.markdown("**📊 Analysis Details:**")
+        if metadata:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Images analyzed:** {metadata.get('image_count', 1)}")
+                st.write(f"**Detail level:** {metadata.get('detail_level', 'Standard')}")
+            with col2:
+                st.write(f"**Analysis focus:** {metadata.get('analysis_focus', 'General')}")
+                if metadata.get('custom_focus'):
+                    st.write(f"**Custom focus:** {metadata.get('custom_focus')}")
+
+def clear_image_analysis_result():
+    """Clear image analysis results and FORCE file uploader reset - UPDATED"""
+    # Clear all result data
+    for key in ['image_analysis_result', 'image_metadata', 'show_enh_details']:
+        if key in st.session_state:
+            del st.session_state[key]
+    
+    # CRITICAL FIX: Force file uploader to reset by incrementing key
+    if 'image_uploader_key' not in st.session_state:
+        st.session_state.image_uploader_key = 0
+    st.session_state.image_uploader_key += 1
+
+def generate_enhanced_image_report(result, metadata):
+    """Generate downloadable enhanced image analysis report"""
+    report_content = f"""
+# Visual Analysis Report
+**Date:** {time.strftime('%Y-%m-%d %H:%M:%S')}
+**Images Analyzed:** {metadata.get('image_count', 1)}
+**Primary Image:** {metadata.get('primary_image', 'Unknown')}
+**Analysis Focus:** {metadata.get('analysis_focus', 'General')}
+**Detail Level:** {metadata.get('detail_level', 'Standard')}
+
+## Analysis Results
+{result['answer']}
+
+## Additional Information
+- **Custom Focus:** {metadata.get('custom_focus', 'None specified')}
+- **Generated by:** Children's Home Management System
+- **Analysis Mode:** {st.session_state.get('performance_mode', 'balanced')}
+
+---
+*Report generated by Children's Home Management System*
+    """
+    
+    st.download_button(
+        label="📥 Download Complete Report",
+        data=report_content,
+        file_name=f"visual_analysis_report_{time.strftime('%Y%m%d_%H%M%S')}.md",
+        mime="text/markdown",
+        key="enh_download_btn"
+    )
+
+# ============================================================================
+# HELPER FUNCTIONS FOR REPORTS
+# ============================================================================
+
+def generate_document_report(result):
+    """Generate downloadable document analysis report"""
+    report_content = f"""
+# Document Analysis Report
+**Date:** {time.strftime('%Y-%m-%d %H:%M:%S')}
+**Analysis Type:** {st.session_state.analysis_metadata.get('analysis_type', 'Unknown')}
+
+## Analysis Results
+{result['answer']}
+
+---
+*Report generated by Children's Home Management System*
+    """
+    
+    st.download_button(
+        label="📥 Download Document Report",
+        data=report_content,
+        file_name=f"document_analysis_{time.strftime('%Y%m%d_%H%M%S')}.md",
+        mime="text/markdown"
+    )
+
+def generate_image_report(result):
+    """Generate downloadable image analysis report"""
+    report_content = f"""
+# Image Analysis Report
+**Date:** {time.strftime('%Y-%m-%d %H:%M:%S')}
+**Image:** {st.session_state.image_metadata.get('image_name', 'Unknown')}
+
+## Visual Analysis Results
+{result['answer']}
+
+---
+*Report generated by Children's Home Management System*
+    """
+    
+    st.download_button(
+        label="📥 Download Image Report",
+        data=report_content,
+        file_name=f"image_analysis_{time.strftime('%Y%m%d_%H%M%S')}.md",
+        mime="text/markdown"
+    )
+
+
+def generate_analysis_report(results, analysis_type, images):
+    """Generate a comprehensive analysis report"""
+    st.markdown("### 📄 Comprehensive Analysis Report")
+    
+    report_content = f"""
+# Image Analysis Report
+**Analysis Type:** {analysis_type}  
+**Date:** {time.strftime('%Y-%m-%d %H:%M:%S')}  
+**Images Analyzed:** {len(images)}
+
+## Executive Summary
+{generate_executive_summary(results)}
+
+## Detailed Findings
+{format_detailed_findings(results)}
+
+## Recommendations
+{generate_recommendations(results)}
+
+## Next Steps
+Based on this analysis, consider the following actions:
+1. Address any critical safety issues immediately
+2. Develop improvement plan for identified gaps
+3. Schedule follow-up assessment in 3-6 months
+4. Document changes and improvements made
+
+---
+*Report generated by Children's Home Management System*
+    """
+    
+    st.markdown(report_content)
+    
+    # Download button
+    st.download_button(
+        label="📥 Download Report",
+        data=report_content,
+        file_name=f"image_analysis_report_{time.strftime('%Y%m%d_%H%M%S')}.md",
+        mime="text/markdown"
+    )
+
+def generate_executive_summary(results):
+    """Generate executive summary from results"""
+    # This would analyze the results and create a summary
+    return "Analysis completed successfully. Key findings and recommendations have been identified."
+
+def format_detailed_findings(results):
+    """Format detailed findings from results"""
+    # This would format the analysis results
+    return "Detailed findings have been documented for each analyzed image."
+
+def generate_recommendations(results):
+    """Generate recommendations from results"""
+    # This would extract recommendations from the analysis
+    return "Specific recommendations have been provided based on the analysis findings."
+
+def compress_image_for_analysis(image_bytes, max_size_kb=30):
+    """Compress image to stay under the AI model size limit"""
+    try:
+        # Open image from bytes
+        image = Image.open(io.BytesIO(image_bytes))
+        
+        # Convert to RGB if necessary
+        if image.mode in ('RGBA', 'LA', 'P'):
+            rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+            rgb_image.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
+            image = rgb_image
+        
+        # Start with reasonable size and quality
+        quality = 85
+        max_dimension = 800
+        
+        # Resize if too large
+        if max(image.size) > max_dimension:
+            ratio = max_dimension / max(image.size)
+            new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+        
+        # Compress until under size limit
+        while True:
+            output = io.BytesIO()
+            image.save(output, format='JPEG', quality=quality, optimize=True)
+            compressed_bytes = output.getvalue()
+            
+            if len(compressed_bytes) <= max_size_kb * 1024:
+                return compressed_bytes
+            
+            # Reduce quality or resize further
+            if quality > 60:
+                quality -= 10
+            else:
+                current_size = image.size
+                new_size = (int(current_size[0] * 0.8), int(current_size[1] * 0.8))
+                image = image.resize(new_size, Image.Resampling.LANCZOS)
+                quality = 75
+            
+            # Safety check
+            if quality < 30 and max(image.size) < 200:
+                break
+        
+        return compressed_bytes
+        
+    except Exception as e:
+        print(f"Image compression failed: {e}")
+        return image_bytes
+
+# ===== SESSION MANAGEMENT =====
+
+def show_session_summary():
+    """Enhanced session summary with performance stats"""
+    with st.sidebar:
+        if st.session_state.get('activity_log'):
+            st.markdown("---")
+            st.markdown("### 📊 Session Summary")
+            
+            activities = st.session_state.get('activity_log', [])
+            question_count = len([a for a in activities if a['action'] == 'question_submitted'])
+            feedback_count = len([a for a in activities if a['action'] == 'feedback_submitted'])
+            
+            st.write(f"**Questions asked:** {question_count}")
+            st.write(f"**Feedback items:** {feedback_count}")
+            
+            session_minutes = int((time.time() - st.session_state.get('session_start', time.time())) / 60)
+            st.write(f"**Session time:** {session_minutes} minutes")
+            
+            # Performance stats if available
+            if hasattr(st.session_state.rag_system, 'get_performance_stats'):
+                try:
+                    perf_stats = st.session_state.rag_system.get_performance_stats()
+                    if isinstance(perf_stats, dict) and perf_stats.get('total_queries', 0) > 0:
+                        st.markdown("**⚡ Performance:**")
+                        avg_time = perf_stats.get('avg_total_time', 0)
+                        cache_hits = perf_stats.get('cache_hits', 0)
+                        st.write(f"Avg response: {avg_time:.1f}s")
+                        if cache_hits > 0:
+                            st.write(f"Cache hits: {cache_hits}")
+                except Exception:
+                    pass
+            
+            with st.expander("📋 Activity Log"):
+                for activity in activities[-10:]:
+                    st.text(f"{activity['timestamp']}: {activity['action']}")
+
+# ===== MAIN APPLICATION =====
+
+def main():
+    """Main application function"""
+    # Setup SQLite with clean logging
+    setup_sqlite_with_clean_logging()
+
+    # Authentication check FIRST - before any other UI elements
+    if not require_authentication():
+        st.stop()  # This stops execution if not authenticated
+    
+    # Environment setup
+    if not setup_environment_variables():
+        st.error("❌ Failed to configure API keys")
+        st.info("💡 Check your .streamlit/secrets.toml file")
+        with st.expander("🔧 Configuration Help"):
+            st.code("""
+# .streamlit/secrets.toml
+[api_keys]
+openai = "your-openai-api-key"
+google = "your-google-api-key"
+            """)
+        st.stop()
+    
+    # Initialize RAG system
+    if 'rag_system' not in st.session_state:
+        with st.spinner("Initializing system..."):
+            st.session_state.rag_system = initialize_rag_system()
+    
+    if st.session_state.rag_system is None:
+        st.error("❌ System initialization failed")
+        st.info("💡 Please refresh the page or contact support")
+        st.stop()
+    
+    # CSS styling
+    st.markdown("""
+    <style>
     .main-header {
         text-align: center;
         padding: 1rem 0 2rem 0;
         border-bottom: 1px solid #f0f0f0;
         margin-bottom: 2rem;
     }
-    
+    .testing-banner {
+        background: linear-gradient(90deg, #ff6b6b, #feca57);
+        color: white;
+        padding: 0.5rem;
+        text-align: center;
+        font-weight: bold;
+        margin-bottom: 1rem;
+        border-radius: 5px;
+    }
     .contextual-tip {
         background-color: #f8f9fa;
         border-left: 3px solid #17a2b8;
@@ -138,676 +1976,151 @@ st.markdown("""
         margin: 1rem 0;
         font-size: 0.9rem;
     }
+    </style>
+    """, unsafe_allow_html=True)
     
-    .tab-container {
-        margin: 2rem 0;
-    }
+    # Beta testing banner
+    st.markdown("""
+    <div class="testing-banner">
+    🧪 BETA TESTING VERSION - Your feedback helps improve this system!
+    </div>
+    """, unsafe_allow_html=True)
     
-    .quick-action-grid {
-        margin: 1rem 0;
-    }
+    # Header
+    st.markdown('<div class="main-header">', unsafe_allow_html=True)
+    st.title("🏠 Children's Home Management System")
+    st.markdown("*Strategic, operational & compliance guidance for residential care*")
     
-    .model-attribution {
-        font-size: 0.8rem;
-        color: #6c757d;
-        font-style: italic;
-        margin-bottom: 1rem;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# CLEAN HEADER - Positioned at very top as requested
-st.markdown('<div class="main-header">', unsafe_allow_html=True)
-st.title("🏠 Children's Home Management System")
-st.markdown("*Strategic, operational & compliance guidance for residential care*")
-st.markdown('</div>', unsafe_allow_html=True)
-
-# CLEAN TAB INTERFACE - Immediately after title as requested
-st.markdown('<div class="tab-container">', unsafe_allow_html=True)
-mode_tab1, mode_tab2 = st.tabs(["💬 Ask Questions", "📷 Analyze Images"])
-st.markdown('</div>', unsafe_allow_html=True)
-
-with mode_tab1:
-    # ENHANCED FEATURE: Answer replacement at top of page
-    if 'current_result' in st.session_state and st.session_state.current_result:
-        # DISPLAY ANSWER AT TOP - replacing question area
-        st.subheader("🧠 Expert Guidance")
-        
-        # ENHANCED FEATURE: Show which AI model was used
-        if 'model_used' in st.session_state and st.session_state.model_used:
-            st.markdown(f'<div class="model-attribution">Response generated by {st.session_state.model_used}</div>', unsafe_allow_html=True)
-        
-        st.write(st.session_state.current_result["answer"])
-        
-        # CLEAN ACTION BUTTONS
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("🔄 Ask New Question", type="primary"):
-                # Clear result and show question form again
-                del st.session_state.current_result
-                if 'current_question' in st.session_state:
-                    st.session_state.current_question = ""
-                if 'model_used' in st.session_state:
-                    del st.session_state.model_used
-                st.rerun()
-        
-        with col2:
-            if st.button("📋 View Key Actions"):
-                st.session_state.show_actions = not st.session_state.get('show_actions', False)
-        
-        with col3:
-            if st.button("📚 View Sources"):
-                st.session_state.show_sources = not st.session_state.get('show_sources', False)
-        
-        # ENHANCED FEATURE: Progressive disclosure of additional information
-        if st.session_state.get('show_actions', False):
-            st.markdown("---")
-            st.markdown("**📋 Key Actions:**")
-            st.markdown("• Review with your management team\n• Consider implementation timeline\n• Monitor and evaluate outcomes")
-        
-        if st.session_state.get('show_sources', False) and st.session_state.current_result.get("source_documents"):
-            st.markdown("---")
-            st.markdown(f"**📚 Sources ({len(st.session_state.current_result['source_documents'])} references):**")
-            for i, doc in enumerate(st.session_state.current_result["source_documents"], 1):
-                with st.expander(f"Source {i}"):
-                    preview = doc.page_content[:400] + "..." if len(doc.page_content) > 400 else doc.page_content
-                    st.write(preview)
+    tester_info = st.session_state.get('tester_info', {})
+    if tester_info:
+        st.markdown(f"*Welcome, {tester_info.get('name', 'Beta Tester')}!*")
     
-    else:
-        # ENHANCED QUESTION FORM - Only when no result
-        st.subheader("💬 Ask Your Question")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Add performance selector
+    add_performance_mode_selector()
+    
+    # Feedback mechanism in sidebar
+    with st.sidebar:
+        st.markdown("### 📝 Beta Feedback")
         
-        # Initialize session state for question
-        if 'current_question' not in st.session_state:
-            st.session_state.current_question = ""
-        
-        # ENHANCED FEATURE: Handle quick action selection
-        if hasattr(st.session_state, 'quick_question'):
-            st.session_state.current_question = st.session_state.quick_question
-            delattr(st.session_state, 'quick_question')
-        
-        # ENHANCED QUESTION INPUT with keyboard shortcut support
-        user_question = st.text_area(
-            "Describe your situation or question:",
-            value=st.session_state.current_question,
-            placeholder="Start typing your question... (e.g., 'How do we prepare for...')  |  Press Cmd/Ctrl+Enter to submit",
-            height=120,
-            key="question_input"
+        feedback_type = st.selectbox(
+            "Feedback Type:",
+            ["💡 Suggestion", "🐛 Bug Report", "👍 Positive", "❓ Question"]
         )
         
-        # ENHANCED FEATURE: FIXED Ctrl+Enter functionality
-        st.components.v1.html("""
-        <script>
-        function setupKeyboardShortcut() {
-            console.log('Setting up keyboard shortcut...');
-            
-            // Find the textarea more reliably
-            const textAreas = document.querySelectorAll('textarea');
-            let targetTextArea = null;
-            
-            // Look for textarea with the specific placeholder or by position
-            for (let textarea of textAreas) {
-                if (textarea.placeholder && 
-                    (textarea.placeholder.includes('Start typing your question') || 
-                     textarea.placeholder.includes('Cmd/Ctrl+Enter to submit'))) {
-                    targetTextArea = textarea;
-                    break;
-                }
-            }
-            
-            // Fallback: get the first visible textarea
-            if (!targetTextArea && textAreas.length > 0) {
-                targetTextArea = textAreas[0];
-            }
-            
-            if (targetTextArea) {
-                // Remove existing listener to avoid duplicates
-                targetTextArea.removeEventListener('keydown', handleKeyDown);
-                
-                // Add the new listener
-                targetTextArea.addEventListener('keydown', handleKeyDown);
-                console.log('Keyboard listener attached to textarea');
-                
-                // Also add to the parent form if it exists
-                const form = targetTextArea.closest('form');
-                if (form) {
-                    form.removeEventListener('keydown', handleKeyDown);
-                    form.addEventListener('keydown', handleKeyDown);
-                    console.log('Keyboard listener also attached to form');
-                }
-            } else {
-                console.log('No suitable textarea found');
-            }
-        }
-
-        function handleKeyDown(e) {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                console.log('Cmd/Ctrl+Enter detected!', {
-                    metaKey: e.metaKey,
-                    ctrlKey: e.ctrlKey,
-                    key: e.key
-                });
-                
-                e.preventDefault();
-                e.stopPropagation();
-                
-                // Find the submit button more reliably
-                let submitButton = null;
-                
-                // Method 1: Look for button with specific text
-                const buttons = document.querySelectorAll('button');
-                for (let button of buttons) {
-                    const buttonText = (button.textContent || button.innerText || '').trim();
-                    if (buttonText.includes('Get Expert Guidance') || 
-                        buttonText.includes('Expert Guidance') ||
-                        buttonText.includes('🧠')) {
-                        submitButton = button;
-                        console.log('Found button by text:', buttonText);
-                        break;
-                    }
-                }
-                
-                // Method 2: Look for button with primary type
-                if (!submitButton) {
-                    const primaryButtons = document.querySelectorAll('button[kind="primary"]');
-                    if (primaryButtons.length > 0) {
-                        submitButton = primaryButtons[0];
-                        console.log('Found primary button');
-                    }
-                }
-                
-                // Method 3: Look for button with data-testid (Streamlit often uses this)
-                if (!submitButton) {
-                    const testButtons = document.querySelectorAll('button[data-testid*="guidance"]');
-                    if (testButtons.length > 0) {
-                        submitButton = testButtons[0];
-                        console.log('Found button by test ID');
-                    }
-                }
-                
-                // Method 4: Look for any button in the same container as the textarea
-                if (!submitButton) {
-                    const container = e.target.closest('.stTextArea')?.parentElement || 
-                                    e.target.closest('div');
-                    if (container) {
-                        const containerButtons = container.querySelectorAll('button');
-                        for (let button of containerButtons) {
-                            if (button.offsetParent !== null) { // Button is visible
-                                submitButton = button;
-                                console.log('Found button in same container');
-                                break;
-                            }
-                        }
-                    }
-                }
-                
-                if (submitButton && !submitButton.disabled) {
-                    console.log('Clicking submit button');
-                    submitButton.click();
-                    
-                    // Visual feedback
-                    submitButton.style.transform = 'scale(0.95)';
-                    setTimeout(() => {
-                        if (submitButton) {
-                            submitButton.style.transform = '';
-                        }
-                    }, 150);
-                } else {
-                    console.log('Submit button not found or disabled');
-                    
-                    // Alternative: trigger a custom event
-                    const customEvent = new CustomEvent('streamlit-submit', {
-                        bubbles: true,
-                        detail: { source: 'keyboard-shortcut' }
-                    });
-                    e.target.dispatchEvent(customEvent);
-                }
-            }
-        }
-
-        // Initialize immediately
-        setupKeyboardShortcut();
-
-        // Set up multiple fallbacks for Streamlit's dynamic rendering
-        setTimeout(setupKeyboardShortcut, 100);
-        setTimeout(setupKeyboardShortcut, 500);
-        setTimeout(setupKeyboardShortcut, 1000);
-        setTimeout(setupKeyboardShortcut, 2000);
-
-        // Watch for DOM changes (when Streamlit reruns)
-        const observer = new MutationObserver(function(mutations) {
-            let shouldSetup = false;
-            
-            mutations.forEach(function(mutation) {
-                if (mutation.type === 'childList') {
-                    // Check if new textareas or buttons were added
-                    const addedNodes = Array.from(mutation.addedNodes);
-                    const hasRelevantChanges = addedNodes.some(node => 
-                        node.nodeType === 1 && (
-                            node.querySelector && (
-                                node.querySelector('textarea') || 
-                                node.querySelector('button')
-                            )
-                        )
-                    );
-                    
-                    if (hasRelevantChanges) {
-                        shouldSetup = true;
-                    }
-                }
-            });
-            
-            if (shouldSetup) {
-                setTimeout(setupKeyboardShortcut, 100);
-            }
-        });
-
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-
-        console.log('Keyboard shortcut system initialized');
-        </script>
-        """, height=0)
+        feedback_text = st.text_area(
+            "Your Feedback:",
+            placeholder="Share thoughts, report bugs, or suggest improvements...",
+            height=100
+        )
         
-        # MAIN SUBMIT BUTTON - Always visible as requested
-        button_clicked = st.button("🧠 Get Expert Guidance", type="primary", use_container_width=True, key="guidance_button")
-        
-        # ENHANCED PROCESSING with improved loading indicators and dual model support
-        if button_clicked:
-            if user_question and user_question.strip():
-                # ENHANCED FEATURE: Improved loading indicators
-                progress_container = st.empty()
-                status_container = st.empty()
-                
-                try:
-                    # Step 1: Initialize with visible progress
-                    with progress_container.container():
-                        progress_bar = st.progress(0)
-                    with status_container.container():
-                        st.info("🔍 Analyzing your question...")
-                    time.sleep(0.5)
-                    
-                    # Step 2: Retrieve relevant documents
-                    with progress_container.container():
-                        progress_bar = st.progress(40)
-                    with status_container.container():
-                        st.info("📚 Searching knowledge base...")
-                    
-                    retriever = st.session_state.rag_system.get_current_retriever()
-                    docs = retriever.get_relevant_documents(user_question)
-                    time.sleep(0.5)
-                    
-                    # Step 3: Prepare context
-                    with progress_container.container():
-                        progress_bar = st.progress(60)
-                    with status_container.container():
-                        st.info("🧠 Preparing expert context...")
-                    
-                    context = "\n\n".join([doc.page_content for doc in docs])
-                    time.sleep(0.5)
-                    
-                    # Step 4: ENHANCED FEATURE - Smart response type detection
-                    with progress_container.container():
-                        progress_bar = st.progress(80)
-                    with status_container.container():
-                        st.info("💭 Generating expert guidance...")
-                    
-                    # ENHANCED FEATURE: Three response types based on question intent
-                    question_lower = user_question.lower()
-                    
-                    # Creation/drafting requests - user wants actual deliverable
-                    creation_indicators = [
-                        "draft", "write", "create", "develop a", "make a", "compose",
-                        "help me write", "help me draft", "help me create", "generate a",
-                        "design a", "build a", "prepare a", "produce a"
-                    ]
-                    
-                    # Factual/informational questions - user wants information
-                    factual_indicators = [
-                        "what are", "what is", "list", "define", "explain", "describe",
-                        "standards", "requirements", "regulations", "according to",
-                        "how many", "which", "who", "when", "where", "tell me about"
-                    ]
-                    
-                    # Strategic guidance requests - user wants strategic advice
-                    strategic_indicators = [
-                        "how do we", "how can we", "what should we", "help us develop",
-                        "strategy for", "approach to", "improve our", "best practices for",
-                        "guidance on", "advice on", "recommend", "suggestions for"
-                    ]
-                    
-                    is_creation_request = any(indicator in question_lower for indicator in creation_indicators)
-                    is_factual = any(indicator in question_lower for indicator in factual_indicators)
-                    is_strategic = any(indicator in question_lower for indicator in strategic_indicators)
-                    
-                    if is_creation_request:
-                        # User wants something created/drafted
-                        enhanced_question = f"""
-                        The user is asking you to create/draft something specific. Please provide the actual deliverable they requested, not strategic advice about how to create it.
-                        
-                        Request: {user_question}
-                        
-                        Please create the specific item requested (email, policy, plan, document, etc.) in a ready-to-use format. Focus on providing the actual content they can use directly, not guidance about how to create it.
-                        
-                        Format the response as the finished deliverable with appropriate structure, professional language, and complete content.
-                        """
-                    elif is_factual and not is_strategic:
-                        # User wants factual information
-                        enhanced_question = f"""
-                        Question: {user_question}
-                        
-                        Please provide a comprehensive and detailed factual response that covers:
-                        1. Complete listing of all relevant standards/requirements
-                        2. Specific regulation numbers where applicable
-                        3. Clear explanation of what each standard covers
-                        4. Key requirements and expectations for each
-                        5. Important details that practitioners need to know
-                        6. Any interconnections between different standards
-                        
-                        Format as clear, informative content with proper structure and detail. Focus on accuracy and completeness of factual information.
-                        """
-                    else:
-                        # User wants strategic guidance
-                        enhanced_question = f"""
-                        As a senior children's home management consultant, provide comprehensive strategic and operational guidance for:
-                        
-                        Question: {user_question}
-                        
-                        Please provide:
-                        1. Strategic considerations and business implications
-                        2. Practical implementation steps with timelines
-                        3. Risk management and mitigation strategies  
-                        4. Child-centered impact assessment
-                        5. Resource requirements and cost considerations
-                        6. Success metrics and monitoring approaches
-                        7. Specific actionable recommendations
-                        
-                        Format your response as professional management guidance for children's home leaders.
-                        """
-                    
-                    # ENHANCED FEATURE: Use dual-model system from rag_system.py
-                    result = st.session_state.rag_system.query(
-                        user_question=enhanced_question,
-                        context_text=context,
-                        source_docs=docs
-                    )
-                    
-                    # Step 5: Complete with model attribution
-                    with progress_container.container():
-                        progress_bar = st.progress(100)
-                    
-                    # ENHANCED FEATURE: Show which model was used
-                    if result and result.get("metadata") and result["metadata"].get("llm_used"):
-                        used_model = result["metadata"]["llm_used"]
-                        with status_container.container():
-                            st.success(f"✅ Response generated by {used_model}")
-                    else:
-                        with status_container.container():
-                            st.success("✅ Guidance ready!")
-                    
-                    time.sleep(1)  # Let users see completion
-                    
-                    # Clear progress indicators
-                    progress_container.empty()
-                    status_container.empty()
-                    
-                    # ENHANCED FEATURE: Store result and show at top
-                    if result and result.get("answer"):
-                        st.session_state.current_result = result
-                        st.session_state.current_question = user_question
-                        # Store which model was used for display
-                        if result.get("metadata") and result["metadata"].get("llm_used"):
-                            st.session_state.model_used = result["metadata"]["llm_used"]
-                        st.rerun()
-                    else:
-                        st.error("❌ Sorry, I couldn't generate a response. This might indicate an issue with both Gemini and ChatGPT models.")
-                        st.info("💡 The system attempts to use both Gemini and ChatGPT with smart routing. If both fail, please check your API configuration or try again later.")
-                        
-                except Exception as e:
-                    # ENHANCED ERROR HANDLING
-                    progress_container.empty()
-                    status_container.empty()
-                    
-                    st.error("❌ An error occurred while processing your question.")
-                    
-                    with st.expander("🔧 Error Details"):
-                        st.code(f"Error type: {type(e).__name__}")
-                        st.code(f"Error message: {str(e)}")
-                        
-                        st.markdown("**💡 Try these solutions:**")
-                        st.markdown("""
-                        • **Refresh the page** and try again
-                        • **Rephrase your question** with more specific details
-                        • **Check your internet connection**
-                        • **Try a shorter, simpler question first**
-                        • **Use one of the Quick Action buttons** instead
-                        """)
+        if st.button("📤 Submit Feedback", type="secondary"):
+            if feedback_text.strip():
+                log_tester_activity(
+                    st.session_state.get('tester_id', 'unknown'),
+                    "feedback_submitted",
+                    f"{feedback_type}: {feedback_text[:100]}..."
+                )
+                st.success("✅ Feedback submitted!")
             else:
-                st.warning("⚠️ Please enter a question to receive guidance")
-        
-        # ENHANCED FEATURE: Auto-complete suggestions
-        if user_question and len(user_question) > 3:
-            suggestions = get_question_suggestions(user_question)
-            if suggestions:
-                st.markdown("**💡 Suggested completions:**")
-                for i, suggestion in enumerate(suggestions):
-                    if st.button(f"📝 {suggestion}", key=f"suggestion_{i}"):
-                        st.session_state.current_question = suggestion
-                        st.rerun()
-        
-        # ENHANCED FEATURE: Contextual help
-        tip = get_contextual_tip(user_question)
-        st.markdown(f'<div class="contextual-tip">{tip}</div>', unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # ENHANCED FEATURE: Quick Action Buttons
-        st.subheader("🚀 Quick Actions")
-        st.markdown("*Or choose from these common scenarios:*")
-        
-        quick_actions = {
-            "🚨 Inspection Prep": "We have an upcoming Ofsted inspection. What should we focus on to ensure we're fully prepared and can demonstrate our improvements?",
-            "💰 Budget Planning": "Help us develop an effective budget strategy for the upcoming financial year while maintaining quality of care.",
-            "👥 Staff Issues": "We're experiencing staff retention challenges. What strategies can we implement to improve staff satisfaction and reduce turnover?",
-            "🏠 New Admission": "We're admitting a new child to our home. What processes and considerations should we prioritize for a successful transition?",
-            "📋 Policy Review": "We need to review and update our policies. What are the current best practices and regulatory requirements we should include?",
-            "🎯 Quality Improvement": "We want to enhance our quality of care and move towards outstanding. What key areas should we focus on?"
-        }
-        
-        # Display quick actions in a clean grid
-        st.markdown('<div class="quick-action-grid">', unsafe_allow_html=True)
-        cols = st.columns(3)
-        for i, (action, question) in enumerate(quick_actions.items()):
-            with cols[i % 3]:
-                if st.button(action, key=f"quick_{i}", use_container_width=True):
-                    st.session_state.quick_question = question
-                    st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # ENHANCED FEATURE: Document upload
-        with st.expander("📎 Add Supporting Documents (Optional)"):
-            uploaded_file = st.file_uploader(
-                "Upload relevant documents for context",
-                type=['pdf', 'docx', 'txt'],
-                help="Upload policies, reports, or other documents for more tailored guidance"
+                st.warning("Please enter feedback before submitting")
+    
+    # Debug controls (only for specific testers)
+    with st.sidebar:
+        if st.session_state.get('tester_id') in ['DEMO001', 'TEST001']:
+            st.markdown("---")
+            st.markdown("### 🔧 Debug Controls")
+            
+            current_debug = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+            debug_mode = st.checkbox(
+                "🔍 Debug Mode", 
+                value=current_debug,
+                help="Show detailed system logs in terminal"
             )
             
-            if uploaded_file:
-                st.success(f"✅ {uploaded_file.name} uploaded")
-                try:
-                    st.session_state.rag_system.process_uploaded_file(uploaded_file.read())
-                    st.info("📚 Document integrated for this session")
-                except Exception as e:
-                    st.error(f"Failed to process: {e}")
+            # Update environment variable
+            if debug_mode != current_debug:
+                if debug_mode:
+                    os.environ['DEBUG_MODE'] = 'true'
+                    st.success("🔍 Debug logging enabled")
+                else:
+                    os.environ['DEBUG_MODE'] = 'false'
+                    st.info("🔇 Debug logging disabled")
+            
+            if debug_mode:
+                st.caption("📝 Debug messages will appear in terminal")
+            else:
+                st.caption("🔇 Only critical events logged")
+    
+    # Show session summary
+    show_session_summary()
+    
+# ============================================================================
+# UPDATED MAIN TAB STRUCTURE
+# ============================================================================
 
-with mode_tab2:
-    # ENHANCED VISUAL ANALYSIS TAB
-    if not COMPLIANCE_FEATURES_AVAILABLE:
-        st.error("❌ Visual analysis features are currently being upgraded.")
-        st.info("💡 Use the 'Ask Questions' tab for comprehensive guidance.")
-    else:
-        st.subheader("📷 Visual Compliance Analysis")
-        st.markdown("Upload facility images for comprehensive assessment and insights.")
-        
-        # Initialize compliance analyzer
-        if 'compliance_analyzer' not in st.session_state:
-            st.session_state.compliance_analyzer = ComplianceAnalyzer(st.session_state.rag_system)
-        
-        # ENHANCED FEATURE: Smart image analysis prompts
-        st.markdown("**🎯 What would you like to focus on?**")
-        
-        analysis_focus_options = {
-            "🛡️ Safety Check": "Analyze this image for health and safety compliance, focusing on fire safety, hazards, and emergency procedures.",
-            "📋 Compliance Review": "Conduct a comprehensive compliance assessment covering all regulatory requirements and standards.",
-            "🏠 Environment Assessment": "Evaluate this space for quality of environment, personalisation, and child experience.",
-            "🍎 Food Safety Focus": "Analyze this kitchen/dining area for food hygiene, safety, and nutritional considerations.",
-            "💚 Wellbeing Spaces": "Assess how well this environment supports children's emotional wellbeing and therapeutic needs."
-        }
-        
-        selected_focus = None
-        cols = st.columns(3)
-        for i, (focus_type, prompt) in enumerate(analysis_focus_options.items()):
-            with cols[i % 3]:
-                if st.button(focus_type, key=f"focus_{i}"):
-                    selected_focus = prompt
-        
-        # Image upload
-        uploaded_image = st.file_uploader(
-            "Upload facility image",
-            type=['png', 'jpg', 'jpeg'],
-            help="Upload photos of any facility area for comprehensive analysis"
+    # Initialize tab state
+    if 'current_tab' not in st.session_state:
+        st.session_state.current_tab = 0
+
+    # Check if we should stay on image tab after analysis
+    if 'stay_on_image_tab' in st.session_state and st.session_state.stay_on_image_tab:
+        st.session_state.current_tab = 2  # Image tab index
+        del st.session_state.stay_on_image_tab
+
+    # Create tabs with state management
+    tab_names = ["💬 Ask Questions", "📄 Analyze Documents", "📷 Analyze Images", "⚙️ System Health"]
+
+    # Use the radio button value directly, don't fight with session state
+    selected_tab = st.radio(
+        "Select Tab:",
+        options=list(range(len(tab_names))),
+        format_func=lambda x: tab_names[x],
+        index=st.session_state.current_tab,
+        horizontal=True,
+        key="tab_selector",
+        label_visibility="collapsed"
+    )
+
+    # Always update session state to match the radio button
+    st.session_state.current_tab = selected_tab
+
+    # Display content based on selected tab
+    if selected_tab == 0:
+        handle_question_tab()
+    elif selected_tab == 1:
+        handle_document_analysis_tab()
+    elif selected_tab == 2:
+        handle_image_tab()
+    elif selected_tab == 3:
+        display_system_health()
+
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align: center; color: #666; font-size: 0.9em; padding: 1rem;">
+    🧪 <strong>Thank you for beta testing!</strong> Your feedback helps improve this system.<br>
+    Use the feedback form in the sidebar to report issues or suggestions.
+    </div>
+    """, unsafe_allow_html=True)
+
+
+
+# ===== MAIN EXECUTION =====
+
+if __name__ == "__main__":
+    # Track page loads
+    if 'page_loads' not in st.session_state:
+        st.session_state['page_loads'] = 0
+        log_tester_activity(
+            st.session_state.get('tester_id', 'unknown'),
+            "session_started",
+            "Application loaded"
         )
+    
+    st.session_state['page_loads'] += 1
+    
+    # Run main application
+    main()
         
-        if uploaded_image:
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                # FIXED: use_container_width instead of deprecated use_column_width
-                st.image(uploaded_image, caption="Image for Analysis", use_container_width=True)
-            
-            with col2:
-                st.markdown("**Analysis Coverage:**")
-                coverage_areas = [
-                    "🛡️ Health & Safety",
-                    "🍎 Food & Nutrition", 
-                    "🤝 Dignity & Respect",
-                    "🏠 Personalisation",
-                    "💚 Wellbeing Spaces",
-                    "🔒 Safeguarding",
-                    "🏢 Environment Quality"
-                ]
-                
-                for area in coverage_areas:
-                    st.write(f"• {area}")
-            
-            # Custom analysis focus
-            custom_focus = st.text_area(
-                "Custom analysis focus (optional):",
-                value=selected_focus or "",
-                placeholder="e.g., 'Focus on therapeutic environment and child comfort' or leave blank for general analysis",
-                height=60
-            )
-            
-            if st.button("🔍 Analyze Image", type="primary", use_container_width=True):
-                # ENHANCED loading for image analysis
-                progress_container = st.empty()
-                status_container = st.empty()
-                
-                try:
-                    # Step 1: Prepare analysis
-                    with progress_container.container():
-                        progress_bar = st.progress(25)
-                    with status_container.container():
-                        st.info("📷 Processing uploaded image...")
-                    
-                    question = custom_focus if custom_focus.strip() else "Analyze this image comprehensively for compliance, quality, and child experience."
-                    image_bytes = uploaded_image.read()
-                    time.sleep(0.5)
-                    
-                    # Step 2: Initialize analyzer
-                    with progress_container.container():
-                        progress_bar = st.progress(50)
-                    with status_container.container():
-                        st.info("🧠 Initializing compliance analysis...")
-                    time.sleep(0.5)
-                    
-                    # Step 3: Conduct analysis
-                    with progress_container.container():
-                        progress_bar = st.progress(75)
-                    with status_container.container():
-                        st.info("🔍 Conducting comprehensive visual analysis...")
-                    
-                    result = st.session_state.compliance_analyzer.analyze_image_compliance(question, image_bytes)
-                    
-                    # Step 4: Complete
-                    with progress_container.container():
-                        progress_bar = st.progress(100)
-                    with status_container.container():
-                        st.success("✅ Analysis complete!")
-                    
-                    time.sleep(1)
-                    progress_container.empty()
-                    status_container.empty()
-                    
-                    if result:
-                        # Clean results display
-                        st.markdown("---")
-                        st.subheader("📊 Analysis Results")
-                        
-                        # Key metrics
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        with col1:
-                            st.metric("Overall Score", f"{result.overall_compliance_score}%")
-                        
-                        with col2:
-                            st.metric("Areas Reviewed", len(result.category_distribution))
-                        
-                        with col3:
-                            st.metric("Findings", result.total_issues)
-                        
-                        with col4:
-                            critical_count = result.risk_distribution.get("CRITICAL", 0)
-                            st.metric("Priority Items", critical_count)
-                        
-                        # Priority actions
-                        if result.priority_actions:
-                            st.subheader("🎯 Priority Actions")
-                            for i, action in enumerate(result.priority_actions, 1):
-                                st.write(f"{i}. {action}")
-                        
-                        # Positive observations
-                        if result.positive_observations:
-                            st.subheader("✅ Strengths Identified")
-                            for observation in result.positive_observations:
-                                st.success(f"• {observation}")
-                        
-                        # Strategic recommendations
-                        if result.recommendations:
-                            st.subheader("💡 Recommendations")
-                            for rec in result.recommendations:
-                                st.write(f"• {rec}")
-                    else:
-                        st.error("❌ Analysis failed to produce results. Please try again with a different image.")
-                        
-                except Exception as e:
-                    # Clear progress indicators on error
-                    progress_container.empty()
-                    status_container.empty()
-                    
-                    st.error("❌ Image analysis failed.")
-                    
-                    with st.expander("🔧 Error Details"):
-                        st.code(f"Error: {str(e)}")
-                        st.markdown("**💡 Try these solutions:**")
-                        st.markdown("""
-                        • **Check image format** - use JPG, PNG, or JPEG
-                        • **Ensure image is clear** and well-lit
-                        • **Try a smaller image** (under 10MB)
-                        • **Refresh the page** and try again
-                        • **Use a different image** of the same area
-                        """)
-
-# Add any additional functionality or initialization here if needed

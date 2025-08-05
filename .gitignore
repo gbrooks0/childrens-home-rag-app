@@ -1,0 +1,16 @@
+# Virtual Environment
+venv/
+
+# Vector Database
+
+# Ignore the local secrets folder
+.streamlit/
+
+# faiss_index/
+
+# Python Caches
+__pycache__/
+*.pyc
+
+# macOS specific files
+.DS_Store
