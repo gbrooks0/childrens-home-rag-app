@@ -85,3 +85,398 @@ Total quality documents loaded: 2413
 2025-08-05 10:48:22,434 - INFO - Processed batch 21
 2025-08-05 10:48:22,665 - INFO - ✓ FAISS database saved to 'faiss_index' with 5422 optimized chunks.
 2025-08-05 10:48:22,665 - INFO - ✓ Metadata saved to 'metadata'
+2025-08-07 17:40:03,956 - INFO - 
+[1/3] Loading local documents...
+2025-08-07 17:40:03,956 - INFO - Loading documents from directory: 'docs'...
+2025-08-07 17:40:15,394 - INFO - NumExpr defaulting to 8 threads.
+2025-08-07 17:40:18,372 - INFO - Successfully loaded 2405 quality documents from local directory.
+2025-08-07 17:40:18,373 - INFO - 
+[2/3] Processing web documents...
+2025-08-07 17:40:18,373 - INFO - Loading URLs from: docs/urls.txt
+2025-08-07 17:40:18,373 - INFO - Loaded 15 URLs from docs/urls.txt
+2025-08-07 17:40:18,373 - INFO - Processing 15 URL(s) with 4 workers...
+2025-08-07 17:40:18,379 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/6849a7b67cba25f610c7db3f/Working_together_to_safeguard_children_2023_-_statutory_guidance.pdf
+2025-08-07 17:40:18,381 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/686b94eefe1a249e937cbd2d/Keeping_children_safe_in_education_2025.pdf
+2025-08-07 17:40:18,382 - INFO - ✓ Loaded cached content: https://learning.nspcc.org.uk/safeguarding-child-protection
+2025-08-07 17:40:18,383 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/657c538495bf650010719097/Children_s_Social_Care_National_Framework__December_2023.pdf
+2025-08-07 17:40:18,383 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/understanding-trauma-and-adversity/
+2025-08-07 17:40:18,383 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/how-to-have-a-conversation-with-young-people-about-mental-health/
+2025-08-07 17:40:18,383 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/a-quick-guide-to-adhd-in-young-people/
+2025-08-07 17:40:18,384 - INFO - ✓ Loaded cached content: https://www.mentalhealth.org.uk/explore-mental-health/a-z-topics/children-and-young-people
+2025-08-07 17:40:18,384 - INFO - ✓ Loaded cached content: https://www.scie.org.uk/children/care/
+2025-08-07 17:40:18,418 - ERROR - ✗ ERROR: Failed to scrape https://communitycare.co.uk/tag/childrens-homes/: 403 Client Error: Forbidden for url: https://communitycare.co.uk/tag/childrens-homes/
+2025-08-07 17:40:18,418 - INFO - ✓ Loaded cached content: https://www.gov.uk/guidance/childrens-homes-recruiting-staff
+2025-08-07 17:40:18,436 - ERROR - ✗ ERROR: Failed to scrape https://beaconhouse.org.uk/what-is-trauma-informed-practice/: 403 Client Error: Forbidden for url: https://beaconhouse.org.uk/what-is-trauma-informed-practice/
+2025-08-07 17:40:18,684 - INFO - ✓ Successfully scraped: https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-independent-fostering-agencies/social-care-common-inspection-framework-sccif-independent-fostering-agencies
+2025-08-07 17:40:18,691 - WARNING - Low quality content filtered from https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-independent-fostering-agencies/social-care-common-inspection-framework-sccif-independent-fostering-agencies
+2025-08-07 17:40:18,691 - INFO - ✓ Successfully scraped: https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-childrens-homes/social-care-common-inspection-framework-sccif-childrens-homes
+2025-08-07 17:40:18,692 - WARNING - Low quality content filtered from https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-childrens-homes/social-care-common-inspection-framework-sccif-childrens-homes
+2025-08-07 17:40:19,608 - INFO - ✓ Successfully scraped: https://www.legislation.gov.uk/uksi/2015/541
+2025-08-07 17:40:19,608 - WARNING - Low quality content filtered from https://www.legislation.gov.uk/uksi/2015/541
+2025-08-07 17:40:19,608 - INFO - Successfully processed 427 document(s) from URLs.
+2025-08-07 17:40:19,608 - INFO - 
+Total quality documents loaded: 2832
+2025-08-07 17:40:19,608 - INFO - 
+[3/3] Creating optimized vector database...
+2025-08-07 17:40:19,608 - INFO - Initializing embeddings model...
+2025-08-07 17:40:19,608 - INFO - Using OpenAI embeddings: text-embedding-3-large
+2025-08-07 17:40:19,717 - INFO - Creating semantic chunks with enhanced splitter...
+2025-08-07 17:40:19,894 - INFO - Created 6289 semantic chunks from 2832 documents.
+2025-08-07 17:40:19,894 - INFO - Deduplicating chunks...
+2025-08-07 17:40:19,906 - INFO - Removed 393 duplicate chunks. 5896 unique chunks remaining.
+2025-08-07 17:40:20,027 - INFO - Removing existing FAISS index at 'faiss_index'...
+2025-08-07 17:40:20,053 - INFO - Creating FAISS vector database with 5896 chunks...
+2025-08-07 17:40:20,053 - INFO - Processing large dataset in batches...
+2025-08-07 17:40:25,924 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:27,000 - INFO - Loading faiss.
+2025-08-07 17:40:27,034 - INFO - Successfully loaded faiss.
+2025-08-07 17:40:28,681 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:30,123 - INFO - Processed batch 2
+2025-08-07 17:40:31,964 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:32,775 - INFO - Processed batch 3
+2025-08-07 17:40:35,176 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:35,497 - INFO - Processed batch 4
+2025-08-07 17:40:37,431 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:38,164 - INFO - Processed batch 5
+2025-08-07 17:40:39,866 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:40,655 - INFO - Processed batch 6
+2025-08-07 17:40:42,721 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:43,462 - INFO - Processed batch 7
+2025-08-07 17:40:45,017 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:45,213 - INFO - Processed batch 8
+2025-08-07 17:40:46,947 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:47,642 - INFO - Processed batch 9
+2025-08-07 17:40:49,103 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:49,777 - INFO - Processed batch 10
+2025-08-07 17:40:51,461 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:51,598 - INFO - Processed batch 11
+2025-08-07 17:40:53,200 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:53,648 - INFO - Processed batch 12
+2025-08-07 17:40:54,838 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:54,963 - INFO - Processed batch 13
+2025-08-07 17:40:56,279 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:57,055 - INFO - Processed batch 14
+2025-08-07 17:40:58,526 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:40:59,379 - INFO - Processed batch 15
+2025-08-07 17:41:01,699 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:41:02,410 - INFO - Processed batch 16
+2025-08-07 17:41:03,595 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:41:04,128 - INFO - Processed batch 17
+2025-08-07 17:41:05,590 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:41:05,709 - INFO - Processed batch 18
+2025-08-07 17:41:07,030 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:41:07,846 - INFO - Processed batch 19
+2025-08-07 17:41:09,276 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:41:09,897 - INFO - Processed batch 20
+2025-08-07 17:41:11,427 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:41:12,115 - INFO - Processed batch 21
+2025-08-07 17:41:13,680 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:41:14,167 - INFO - Processed batch 22
+2025-08-07 17:41:15,063 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 17:41:15,628 - INFO - Processed batch 23
+2025-08-07 17:41:15,839 - INFO - ✓ FAISS database saved to 'faiss_index' with 5896 optimized chunks.
+2025-08-07 17:41:15,839 - INFO - ✓ Metadata saved to 'metadata'
+2025-08-07 18:41:14,344 - INFO - 
+[1/4] Initializing embedding models...
+2025-08-07 18:41:14,345 - INFO - Initializing embedding models...
+2025-08-07 18:41:14,951 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:15,025 - INFO - ✓ OPENAI: text-embedding-3-large (dimensions: 3072)
+2025-08-07 18:41:15,461 - INFO - ✓ GOOGLE: models/text-embedding-004 (dimensions: 768)
+2025-08-07 18:41:15,463 - INFO - Model information saved to metadata/embedding_models.json
+2025-08-07 18:41:15,463 - INFO - ✅ Active providers: openai, google
+2025-08-07 18:41:15,463 - INFO - 
+[2/4] Loading local documents...
+2025-08-07 18:41:15,463 - INFO - Loading documents from directory: 'docs'...
+2025-08-07 18:41:25,196 - INFO - NumExpr defaulting to 8 threads.
+2025-08-07 18:41:27,703 - INFO - Successfully loaded 2405 quality documents from local directory.
+2025-08-07 18:41:27,703 - INFO - 
+[3/4] Processing web documents...
+2025-08-07 18:41:27,703 - INFO - Loading URLs from: docs/urls.txt
+2025-08-07 18:41:27,704 - INFO - Loaded 15 URLs from docs/urls.txt
+2025-08-07 18:41:27,704 - INFO - Processing 15 URL(s) with 4 workers...
+2025-08-07 18:41:27,710 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/6849a7b67cba25f610c7db3f/Working_together_to_safeguard_children_2023_-_statutory_guidance.pdf
+2025-08-07 18:41:27,712 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/686b94eefe1a249e937cbd2d/Keeping_children_safe_in_education_2025.pdf
+2025-08-07 18:41:27,713 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/657c538495bf650010719097/Children_s_Social_Care_National_Framework__December_2023.pdf
+2025-08-07 18:41:27,713 - INFO - ✓ Loaded cached content: https://learning.nspcc.org.uk/safeguarding-child-protection
+2025-08-07 18:41:27,714 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/understanding-trauma-and-adversity/
+2025-08-07 18:41:27,714 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/a-quick-guide-to-adhd-in-young-people/
+2025-08-07 18:41:27,714 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/how-to-have-a-conversation-with-young-people-about-mental-health/
+2025-08-07 18:41:27,714 - INFO - ✓ Loaded cached content: https://www.mentalhealth.org.uk/explore-mental-health/a-z-topics/children-and-young-people
+2025-08-07 18:41:27,715 - INFO - ✓ Loaded cached content: https://www.scie.org.uk/children/care/
+2025-08-07 18:41:27,752 - ERROR - ✗ ERROR: Failed to scrape https://communitycare.co.uk/tag/childrens-homes/: 403 Client Error: Forbidden for url: https://communitycare.co.uk/tag/childrens-homes/
+2025-08-07 18:41:27,753 - INFO - ✓ Loaded cached content: https://www.gov.uk/guidance/childrens-homes-recruiting-staff
+2025-08-07 18:41:27,791 - ERROR - ✗ ERROR: Failed to scrape https://beaconhouse.org.uk/what-is-trauma-informed-practice/: 403 Client Error: Forbidden for url: https://beaconhouse.org.uk/what-is-trauma-informed-practice/
+2025-08-07 18:41:28,065 - INFO - ✓ Successfully scraped: https://www.legislation.gov.uk/uksi/2015/541
+2025-08-07 18:41:28,065 - WARNING - Low quality content filtered from https://www.legislation.gov.uk/uksi/2015/541
+2025-08-07 18:41:28,109 - INFO - ✓ Successfully scraped: https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-independent-fostering-agencies/social-care-common-inspection-framework-sccif-independent-fostering-agencies
+2025-08-07 18:41:28,116 - WARNING - Low quality content filtered from https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-independent-fostering-agencies/social-care-common-inspection-framework-sccif-independent-fostering-agencies
+2025-08-07 18:41:28,124 - INFO - ✓ Successfully scraped: https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-childrens-homes/social-care-common-inspection-framework-sccif-childrens-homes
+2025-08-07 18:41:28,124 - WARNING - Low quality content filtered from https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-childrens-homes/social-care-common-inspection-framework-sccif-childrens-homes
+2025-08-07 18:41:28,125 - INFO - Successfully processed 427 document(s) from URLs.
+2025-08-07 18:41:28,125 - INFO - 
+Total quality documents loaded: 2832
+2025-08-07 18:41:28,125 - INFO - 
+[4/4] Creating dual vector databases...
+2025-08-07 18:41:28,125 - INFO - Creating semantic chunks with enhanced splitter...
+2025-08-07 18:41:28,303 - INFO - Created 6289 semantic chunks from 2832 documents.
+2025-08-07 18:41:28,303 - INFO - Deduplicating chunks...
+2025-08-07 18:41:28,315 - INFO - Removed 393 duplicate chunks. 5896 unique chunks remaining.
+2025-08-07 18:41:28,437 - INFO - 
+🔄 Creating OPENAI vector database...
+2025-08-07 18:41:28,437 - INFO - Removing existing openai index at 'indexes/openai_index'...
+2025-08-07 18:41:28,438 - INFO - Processing large dataset for openai in batches...
+2025-08-07 18:41:31,368 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:32,275 - INFO - Loading faiss.
+2025-08-07 18:41:32,311 - INFO - Successfully loaded faiss.
+2025-08-07 18:41:33,994 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:34,605 - INFO - openai: Processed batch 2
+2025-08-07 18:41:36,721 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:37,445 - INFO - openai: Processed batch 3
+2025-08-07 18:41:38,908 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:39,326 - INFO - openai: Processed batch 4
+2025-08-07 18:41:41,098 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:41,946 - INFO - openai: Processed batch 5
+2025-08-07 18:41:43,591 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:44,326 - INFO - openai: Processed batch 6
+2025-08-07 18:41:46,077 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:46,675 - INFO - openai: Processed batch 7
+2025-08-07 18:41:48,122 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:48,488 - INFO - openai: Processed batch 8
+2025-08-07 18:41:50,888 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:51,346 - INFO - openai: Processed batch 9
+2025-08-07 18:41:52,834 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:53,819 - INFO - openai: Processed batch 10
+2025-08-07 18:41:55,601 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:56,416 - INFO - openai: Processed batch 11
+2025-08-07 18:41:57,749 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:41:58,563 - INFO - openai: Processed batch 12
+2025-08-07 18:42:00,604 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:42:01,311 - INFO - openai: Processed batch 13
+2025-08-07 18:42:03,771 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:42:04,523 - INFO - openai: Processed batch 14
+2025-08-07 18:42:06,548 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:42:07,249 - INFO - openai: Processed batch 15
+2025-08-07 18:42:08,812 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:42:09,532 - INFO - openai: Processed batch 16
+2025-08-07 18:42:10,959 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:42:11,689 - INFO - openai: Processed batch 17
+2025-08-07 18:42:13,008 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:42:13,352 - INFO - openai: Processed batch 18
+2025-08-07 18:42:15,055 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:42:15,720 - INFO - openai: Processed batch 19
+2025-08-07 18:42:17,923 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:42:18,615 - INFO - openai: Processed batch 20
+2025-08-07 18:42:20,380 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:42:20,907 - INFO - openai: Processed batch 21
+2025-08-07 18:42:22,326 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:42:22,933 - INFO - openai: Processed batch 22
+2025-08-07 18:42:24,068 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 18:42:24,603 - INFO - openai: Processed batch 23
+2025-08-07 18:42:24,861 - INFO - ✅ OPENAI database created successfully!
+2025-08-07 18:42:24,861 - INFO -    📁 Path: indexes/openai_index
+2025-08-07 18:42:24,861 - INFO -    📊 Chunks: 5896
+2025-08-07 18:42:24,861 - INFO -    ⏱️  Time: 56.42s
+2025-08-07 18:42:24,861 - INFO -    📐 Dimensions: 3072
+2025-08-07 18:42:24,861 - INFO - 
+🔄 Creating GOOGLE vector database...
+2025-08-07 18:42:24,861 - INFO - Removing existing google index at 'indexes/google_index'...
+2025-08-07 18:42:24,861 - INFO - Processing large dataset for google in batches...
+2025-08-07 18:42:39,655 - INFO - google: Processed batch 2
+2025-08-07 18:42:44,086 - INFO - google: Processed batch 3
+2025-08-07 18:42:48,899 - INFO - google: Processed batch 4
+2025-08-07 18:42:53,892 - INFO - google: Processed batch 5
+2025-08-07 18:42:58,772 - INFO - google: Processed batch 6
+2025-08-07 18:43:03,927 - INFO - google: Processed batch 7
+2025-08-07 18:43:08,228 - INFO - google: Processed batch 8
+2025-08-07 18:43:13,046 - INFO - google: Processed batch 9
+2025-08-07 18:43:17,546 - INFO - google: Processed batch 10
+2025-08-07 18:43:22,500 - INFO - google: Processed batch 11
+2025-08-07 18:43:27,270 - INFO - google: Processed batch 12
+2025-08-07 18:43:31,267 - INFO - google: Processed batch 13
+2025-08-07 18:43:35,214 - INFO - google: Processed batch 14
+2025-08-07 18:43:39,519 - INFO - google: Processed batch 15
+2025-08-07 18:43:43,736 - INFO - google: Processed batch 16
+2025-08-07 18:43:47,855 - INFO - google: Processed batch 17
+2025-08-07 18:43:52,082 - INFO - google: Processed batch 18
+2025-08-07 18:43:56,152 - INFO - google: Processed batch 19
+2025-08-07 18:44:00,350 - INFO - google: Processed batch 20
+2025-08-07 18:44:04,340 - INFO - google: Processed batch 21
+2025-08-07 18:44:08,887 - INFO - google: Processed batch 22
+2025-08-07 18:44:11,713 - INFO - google: Processed batch 23
+2025-08-07 18:44:12,051 - INFO - ✅ GOOGLE database created successfully!
+2025-08-07 18:44:12,051 - INFO -    📁 Path: indexes/google_index
+2025-08-07 18:44:12,051 - INFO -    📊 Chunks: 5896
+2025-08-07 18:44:12,051 - INFO -    ⏱️  Time: 107.19s
+2025-08-07 18:44:12,051 - INFO -    📐 Dimensions: 768
+2025-08-07 22:05:00,741 - INFO - 
+[1/4] Initializing embedding models...
+2025-08-07 22:05:00,741 - INFO - Initializing embedding models...
+2025-08-07 22:05:01,291 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:05:01,302 - INFO - ✓ OPENAI: text-embedding-3-large (dimensions: 3072)
+2025-08-07 22:05:01,847 - INFO - ✓ GOOGLE: models/text-embedding-004 (dimensions: 768)
+2025-08-07 22:05:01,849 - INFO - Model information saved to metadata/embedding_models.json
+2025-08-07 22:05:01,849 - INFO - ✅ Active providers: openai, google
+2025-08-07 22:05:01,850 - INFO - 
+[2/4] Running incremental update...
+2025-08-07 22:05:01,850 - INFO - 🔍 Detecting document changes...
+2025-08-07 22:05:01,853 - INFO - Loading URLs from: docs/urls.txt
+2025-08-07 22:05:01,854 - INFO - Loaded 15 URLs from docs/urls.txt
+2025-08-07 22:05:01,854 - INFO - Change detection: 72 new, 0 modified, 0 deleted
+2025-08-07 22:05:01,854 - INFO - 💾 Creating backup of existing indexes...
+2025-08-07 22:05:02,012 - INFO - Backed up openai index to backups/20250807_220501/openai_index
+2025-08-07 22:05:02,063 - INFO - Backed up google index to backups/20250807_220501/google_index
+2025-08-07 22:05:02,081 - INFO - Backup created at backups/20250807_220501
+2025-08-07 22:05:02,081 - INFO - 📂 Loading existing indexes...
+2025-08-07 22:05:02,190 - INFO - Loaded existing openai index (5896 vectors)
+2025-08-07 22:05:02,231 - INFO - Loaded existing google index (5896 vectors)
+2025-08-07 22:05:02,231 - INFO - 📝 Processing 72 new and 0 modified documents...
+2025-08-07 22:05:02,231 - INFO - Processing 57 local files...
+2025-08-07 22:05:05,640 - INFO - NumExpr defaulting to 8 threads.
+2025-08-07 22:05:14,125 - INFO - Processing 15 URLs...
+2025-08-07 22:05:14,125 - INFO - Processing 15 URL(s) with 4 workers...
+2025-08-07 22:05:14,130 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/686b94eefe1a249e937cbd2d/Keeping_children_safe_in_education_2025.pdf
+2025-08-07 22:05:14,132 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/6849a7b67cba25f610c7db3f/Working_together_to_safeguard_children_2023_-_statutory_guidance.pdf
+2025-08-07 22:05:14,132 - INFO - ✓ Loaded cached content: https://learning.nspcc.org.uk/safeguarding-child-protection
+2025-08-07 22:05:14,133 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/657c538495bf650010719097/Children_s_Social_Care_National_Framework__December_2023.pdf
+2025-08-07 22:05:14,133 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/understanding-trauma-and-adversity/
+2025-08-07 22:05:14,134 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/a-quick-guide-to-adhd-in-young-people/
+2025-08-07 22:05:14,134 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/how-to-have-a-conversation-with-young-people-about-mental-health/
+2025-08-07 22:05:14,134 - INFO - ✓ Loaded cached content: https://www.mentalhealth.org.uk/explore-mental-health/a-z-topics/children-and-young-people
+2025-08-07 22:05:14,135 - INFO - ✓ Loaded cached content: https://www.scie.org.uk/children/care/
+2025-08-07 22:05:14,181 - ERROR - ✗ ERROR: Failed to scrape https://communitycare.co.uk/tag/childrens-homes/: 403 Client Error: Forbidden for url: https://communitycare.co.uk/tag/childrens-homes/
+2025-08-07 22:05:14,206 - INFO - ✓ Successfully scraped: https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-childrens-homes/social-care-common-inspection-framework-sccif-childrens-homes
+2025-08-07 22:05:14,206 - WARNING - Low quality content filtered from https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-childrens-homes/social-care-common-inspection-framework-sccif-childrens-homes
+2025-08-07 22:05:14,206 - ERROR - ✗ ERROR: Failed to scrape https://beaconhouse.org.uk/what-is-trauma-informed-practice/: 403 Client Error: Forbidden for url: https://beaconhouse.org.uk/what-is-trauma-informed-practice/
+2025-08-07 22:05:14,206 - INFO - ✓ Loaded cached content: https://www.gov.uk/guidance/childrens-homes-recruiting-staff
+2025-08-07 22:05:14,365 - INFO - ✓ Successfully scraped: https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-independent-fostering-agencies/social-care-common-inspection-framework-sccif-independent-fostering-agencies
+2025-08-07 22:05:14,372 - WARNING - Low quality content filtered from https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-independent-fostering-agencies/social-care-common-inspection-framework-sccif-independent-fostering-agencies
+2025-08-07 22:05:14,971 - INFO - ✓ Successfully scraped: https://www.legislation.gov.uk/uksi/2015/541
+2025-08-07 22:05:14,982 - WARNING - Low quality content filtered from https://www.legislation.gov.uk/uksi/2015/541
+2025-08-07 22:05:14,982 - INFO - Successfully processed 427 document(s) from URLs.
+2025-08-07 22:05:14,983 - INFO - Processed 2934 documents from 72 sources.
+2025-08-07 22:05:14,983 - INFO - Creating semantic chunks with enhanced splitter...
+2025-08-07 22:05:15,173 - INFO - Created 6497 semantic chunks from 2934 documents.
+2025-08-07 22:05:15,173 - INFO - Deduplicating chunks...
+2025-08-07 22:05:15,186 - INFO - Removed 393 duplicate chunks. 6104 unique chunks remaining.
+2025-08-07 22:05:15,186 - INFO - ➕ Adding 6104 chunks to indexes...
+2025-08-07 22:05:17,309 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 400 Bad Request"
+2025-08-07 22:05:17,313 - ERROR - Error adding chunks to openai index: Error code: 400 - {'error': {'message': 'Requested 333295 tokens, max 300000 tokens per request', 'type': 'max_tokens_per_request', 'param': None, 'code': 'max_tokens_per_request'}}
+2025-08-07 22:06:58,474 - INFO - Added 6104 chunks to google index
+2025-08-07 22:06:58,649 - INFO - 💾 Saving updated indexes...
+2025-08-07 22:06:58,864 - INFO - Saved openai index to indexes/openai_index (5896 vectors)
+2025-08-07 22:06:59,084 - INFO - Saved google index to indexes/google_index (12000 vectors)
+2025-08-07 22:06:59,102 - INFO - ✅ Incremental update completed successfully!
+2025-08-07 22:12:25,926 - INFO - 
+[1/4] Initializing embedding models...
+2025-08-07 22:12:25,926 - INFO - Initializing embedding models...
+2025-08-07 22:12:26,472 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:12:26,515 - INFO - ✓ OPENAI: text-embedding-3-large (dimensions: 3072)
+2025-08-07 22:12:26,983 - INFO - ✓ GOOGLE: models/text-embedding-004 (dimensions: 768)
+2025-08-07 22:12:26,985 - INFO - Model information saved to metadata/embedding_models.json
+2025-08-07 22:12:26,986 - INFO - ✅ Active providers: openai, google
+2025-08-07 22:12:26,997 - INFO - 
+[2/4] Loading local documents...
+2025-08-07 22:12:26,998 - INFO - Loading documents from directory: 'docs'...
+2025-08-07 22:12:35,374 - INFO - NumExpr defaulting to 8 threads.
+2025-08-07 22:12:37,567 - INFO - Successfully loaded 2506 quality documents from local directory.
+2025-08-07 22:12:37,567 - INFO - 
+[3/4] Processing web documents...
+2025-08-07 22:12:37,567 - INFO - Loading URLs from: docs/urls.txt
+2025-08-07 22:12:37,568 - INFO - Loaded 15 URLs from docs/urls.txt
+2025-08-07 22:12:37,568 - INFO - Processing 15 URL(s) with 4 workers...
+2025-08-07 22:12:37,572 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/6849a7b67cba25f610c7db3f/Working_together_to_safeguard_children_2023_-_statutory_guidance.pdf
+2025-08-07 22:12:37,577 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/686b94eefe1a249e937cbd2d/Keeping_children_safe_in_education_2025.pdf
+2025-08-07 22:12:37,578 - INFO - ✓ Loaded cached content: https://learning.nspcc.org.uk/safeguarding-child-protection
+2025-08-07 22:12:37,578 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/understanding-trauma-and-adversity/
+2025-08-07 22:12:37,579 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/657c538495bf650010719097/Children_s_Social_Care_National_Framework__December_2023.pdf
+2025-08-07 22:12:37,579 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/a-quick-guide-to-adhd-in-young-people/
+2025-08-07 22:12:37,579 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/how-to-have-a-conversation-with-young-people-about-mental-health/
+2025-08-07 22:12:37,580 - INFO - ✓ Loaded cached content: https://www.mentalhealth.org.uk/explore-mental-health/a-z-topics/children-and-young-people
+2025-08-07 22:12:37,581 - INFO - ✓ Loaded cached content: https://www.scie.org.uk/children/care/
+2025-08-07 22:12:37,609 - ERROR - ✗ ERROR: Failed to scrape https://communitycare.co.uk/tag/childrens-homes/: 403 Client Error: Forbidden for url: https://communitycare.co.uk/tag/childrens-homes/
+2025-08-07 22:12:37,610 - INFO - ✓ Loaded cached content: https://www.gov.uk/guidance/childrens-homes-recruiting-staff
+2025-08-07 22:12:37,794 - INFO - ✓ Successfully scraped: https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-childrens-homes/social-care-common-inspection-framework-sccif-childrens-homes
+2025-08-07 22:12:37,795 - WARNING - Low quality content filtered from https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-childrens-homes/social-care-common-inspection-framework-sccif-childrens-homes
+2025-08-07 22:12:37,796 - ERROR - ✗ ERROR: Failed to scrape https://beaconhouse.org.uk/what-is-trauma-informed-practice/: 403 Client Error: Forbidden for url: https://beaconhouse.org.uk/what-is-trauma-informed-practice/
+2025-08-07 22:12:37,822 - INFO - ✓ Successfully scraped: https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-independent-fostering-agencies/social-care-common-inspection-framework-sccif-independent-fostering-agencies
+2025-08-07 22:12:37,822 - WARNING - Low quality content filtered from https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-independent-fostering-agencies/social-care-common-inspection-framework-sccif-independent-fostering-agencies
+2025-08-07 22:12:37,907 - INFO - ✓ Successfully scraped: https://www.legislation.gov.uk/uksi/2015/541
+2025-08-07 22:12:37,907 - WARNING - Low quality content filtered from https://www.legislation.gov.uk/uksi/2015/541
+2025-08-07 22:12:37,908 - INFO - Successfully processed 427 document(s) from URLs.
+2025-08-07 22:12:37,908 - INFO - 
+Total quality documents loaded: 2933
+2025-08-07 22:12:37,908 - INFO - 
+[4/4] Creating dual vector databases...
+2025-08-07 22:12:37,908 - INFO - Creating semantic chunks with enhanced splitter...
+2025-08-07 22:12:38,115 - INFO - Created 6496 semantic chunks from 2933 documents.
+2025-08-07 22:12:38,115 - INFO - Deduplicating chunks...
+2025-08-07 22:12:38,127 - INFO - Removed 393 duplicate chunks. 6103 unique chunks remaining.
+2025-08-07 22:12:38,252 - INFO - 
+🔄 Creating OPENAI vector database...
+2025-08-07 22:12:38,252 - INFO - Removing existing openai index at 'indexes/openai_index'...
+2025-08-07 22:12:38,282 - INFO - Processing large dataset for openai in batches...
+2025-08-07 22:12:41,789 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:12:42,721 - INFO - openai: Created initial index with 500 chunks
+2025-08-07 22:12:42,721 - INFO - openai: Processing batch 2/13 (500 chunks)
+2025-08-07 22:12:45,475 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:12:46,316 - INFO - openai: Successfully merged batch 2
+2025-08-07 22:12:46,316 - INFO - openai: Processing batch 3/13 (500 chunks)
+2025-08-07 22:12:49,612 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:12:50,427 - INFO - openai: Successfully merged batch 3
+2025-08-07 22:12:50,427 - INFO - openai: Processing batch 4/13 (500 chunks)
+2025-08-07 22:12:56,399 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:12:57,317 - INFO - openai: Successfully merged batch 4
+2025-08-07 22:12:57,317 - INFO - openai: Processing batch 5/13 (500 chunks)
+2025-08-07 22:13:02,871 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:13:03,715 - INFO - openai: Successfully merged batch 5
+2025-08-07 22:13:03,715 - INFO - openai: Processing batch 6/13 (500 chunks)
+2025-08-07 22:13:06,612 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:13:07,256 - INFO - openai: Successfully merged batch 6
+2025-08-07 22:13:07,257 - INFO - openai: Processing batch 7/13 (500 chunks)
+2025-08-07 22:13:09,990 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:13:10,806 - INFO - openai: Successfully merged batch 7
+2025-08-07 22:13:10,807 - INFO - openai: Processing batch 8/13 (500 chunks)
+2025-08-07 22:13:14,007 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:13:14,925 - INFO - openai: Successfully merged batch 8
+2025-08-07 22:13:14,925 - INFO - openai: Processing batch 9/13 (500 chunks)
+2025-08-07 22:13:17,410 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:13:18,190 - INFO - openai: Successfully merged batch 9
+2025-08-07 22:13:18,190 - INFO - openai: Processing batch 10/13 (500 chunks)
+2025-08-07 22:13:22,161 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:13:23,034 - INFO - openai: Successfully merged batch 10
+2025-08-07 22:13:23,034 - INFO - openai: Processing batch 11/13 (500 chunks)
+2025-08-07 22:13:26,885 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:13:27,281 - INFO - openai: Successfully merged batch 11
+2025-08-07 22:13:27,282 - INFO - openai: Processing batch 12/13 (500 chunks)
+2025-08-07 22:13:29,678 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:13:30,366 - INFO - openai: Successfully merged batch 12
+2025-08-07 22:13:30,366 - INFO - openai: Processing batch 13/13 (103 chunks)
+2025-08-07 22:13:31,085 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-07 22:13:31,552 - INFO - openai: Successfully merged batch 13
+2025-08-07 22:13:31,791 - INFO - ✅ OPENAI database created successfully!
+2025-08-07 22:13:31,791 - INFO -    📁 Path: indexes/openai_index
+2025-08-07 22:13:31,791 - INFO -    📊 Chunks: 6103
+2025-08-07 22:13:31,791 - INFO -    ⏱️  Time: 53.51s
+2025-08-07 22:13:31,791 - INFO -    📐 Dimensions: 3072
+2025-08-07 22:13:31,791 - INFO - 
+🔄 Creating GOOGLE vector database...
+2025-08-07 22:13:31,791 - INFO - Removing existing google index at 'indexes/google_index'...
+2025-08-07 22:13:31,805 - INFO - Processing large dataset for google in batches...
+2025-08-07 22:13:50,837 - INFO - google: Created initial index with 1000 chunks
+2025-08-07 22:13:50,838 - INFO - google: Processing batch 2/7 (1000 chunks)
+2025-08-07 22:14:08,523 - INFO - google: Successfully merged batch 2
+2025-08-07 22:14:08,524 - INFO - google: Processing batch 3/7 (1000 chunks)
+2025-08-07 22:14:26,475 - INFO - google: Successfully merged batch 3
+2025-08-07 22:14:26,477 - INFO - google: Processing batch 4/7 (1000 chunks)
+2025-08-07 22:14:43,219 - INFO - google: Successfully merged batch 4
+2025-08-07 22:14:43,219 - INFO - google: Processing batch 5/7 (1000 chunks)
+2025-08-07 22:14:59,026 - INFO - google: Successfully merged batch 5
+2025-08-07 22:14:59,027 - INFO - google: Processing batch 6/7 (1000 chunks)
+2025-08-07 22:15:14,775 - INFO - google: Successfully merged batch 6
+2025-08-07 22:15:14,777 - INFO - google: Processing batch 7/7 (103 chunks)
+2025-08-07 22:15:16,490 - INFO - google: Successfully merged batch 7
+2025-08-07 22:15:16,690 - INFO - ✅ GOOGLE database created successfully!
+2025-08-07 22:15:16,690 - INFO -    📁 Path: indexes/google_index
+2025-08-07 22:15:16,690 - INFO -    📊 Chunks: 6103
+2025-08-07 22:15:16,690 - INFO -    ⏱️  Time: 104.88s
+2025-08-07 22:15:16,690 - INFO -    📐 Dimensions: 768
