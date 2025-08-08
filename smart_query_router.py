@@ -356,7 +356,9 @@ class SmartRouter:
             # Fallback to default models
             try:
                 self.embedding_models["openai"] = OpenAIEmbeddings(show_progress_bar=False)
-                self.embedding_models["google"] = GoogleGenerativeAIEmbeddings()
+                self.embedding_models["google"] = GoogleGenerativeAIEmbeddings(
+                    model="models/embedding-001"
+                )  # ← LINE 151 - FIXED
             except Exception as e:
                 logger.error(f"Failed to load default embedding models: {e}")
     
