@@ -50,6 +50,7 @@ class ResponseMode(Enum):
     STAFF_DEVELOPMENT = "staff_development"
     INCIDENT_MANAGEMENT = "incident_management"
     QUALITY_ASSURANCE = "quality_assurance"
+    LOCATION_RISK_ASSESSMENT = "location_risk_assessment"
 
 class PerformanceMode(Enum):
     SPEED = "fast"
@@ -196,17 +197,23 @@ class SmartResponseDetector:
         
         # Safeguarding assessment patterns
         self.safeguarding_patterns = [
-            r'\bsafeguarding\s+(?:assessment|concern|issue)\b',
-            r'\bchild\s+protection\b',
-            r'\brisk\s+assessment\b',
-            r'\bsafety\s+planning\b',
+            # INCIDENT-BASED safeguarding (should trigger SAFEGUARDING_ASSESSMENT)
+            r'\bsafeguarding\s+(?:concern|incident|issue|allegation)\b',
+            r'\bchild\s+protection\s+(?:concern|incident|case)\b',
+            r'\brisk\s+assessment\s+(?:for|following|after)\s+(?:incident|concern|allegation)\b',
             r'\bdisclosure\s+of\s+abuse\b',
             r'\bsuspected\s+abuse\b',
-            r'\bmulti[–-]?agency\s+working\b',
-            r'\bsocial\s+services\s+referral\b',
             r'\bchild\s+at\s+risk\b',
             r'\bwelfare\s+concerns?\b',
             r'\bsection\s+(?:17|47)\b',
+            r'\busing\s+(?:the\s+)?signs\s+of\s+safety\b',
+            r'\badvise\s+on\s+(?:the\s+)?(?:following\s+)?case\b',
+            r'\bcase\s+(?:study|scenario|assessment)\b',
+            r'\b(?:assess|evaluate)\s+(?:this\s+)?(?:case|situation|scenario)\b',
+            r'\bwhat\s+should\s+(?:i|we)\s+do\b.*\b(?:concern|incident|allegation)\b',
+            
+            # EXCLUDE location-based risk assessments from safeguarding detection
+            # These should NOT trigger SAFEGUARDING_ASSESSMENT template
         ]
         
         # Therapeutic approaches patterns
@@ -235,6 +242,18 @@ class SmartResponseDetector:
             r'\brestraint\s+(?:techniques?|procedures?|policies?)\b',
             r'\bconsequences\s+and\s+sanctions\b',
             r'\bbehaviour\s+(?:plans?|charts?|contracts?)\b',
+        ]
+
+        # NEW: Location risk assessment patterns (should trigger COMPREHENSIVE or new template)
+        self.location_risk_patterns = [
+            r'\blocation\s+risk\s+assessment\b',
+            r'\b(?:assess|assessing)\s+(?:the\s+)?safety\s+of\s+(?:a\s+)?(?:specific\s+)?(?:address|location|area|place)\b',
+            r'\brisk\s+assessment\s+for\s+(?:address|location|area|place)\b',
+            r'\b(?:environmental|geographical|area)\s+(?:risk|safety)\s+assessment\b',
+            r'\bfactors\s+(?:to\s+)?consider\s+(?:when\s+)?assessing\s+(?:the\s+)?safety\s+of\b',
+            r'\bcreate\s+(?:a\s+)?(?:location|area|environmental)\s+risk\s+assessment\b',
+            r'\b(?:what|which)\s+factors\s+should\s+(?:i|we)\s+consider\b.*\b(?:location|address|area)\b',
+            r'\bassess(?:ing)?\s+(?:the\s+)?(?:safety|risks?)\s+(?:of|at)\s+[A-Z][^,]+(?:,\s*[A-Z0-9]{2,8}\s*[0-9][A-Z]{2})\b', # UK postcode pattern
         ]
         
         # Staff development patterns
@@ -420,14 +439,21 @@ class SmartResponseDetector:
         return ResponseMode.STANDARD
     
     def _detect_specialized_mode(self, question: str) -> Optional[ResponseMode]:
-        """Detect specialized children's services modes"""
+        """Detect specialized children's services modes - ENHANCED VERSION"""
         
+        # PRIORITY 1: Location Risk Assessment (before general safeguarding)
+        if any(re.search(pattern, question, re.IGNORECASE) for pattern in self.location_risk_patterns):
+            return ResponseMode.LOCATION_RISK_ASSESSMENT
+        
+        # PRIORITY 2: Regulatory compliance
         if any(re.search(pattern, question, re.IGNORECASE) for pattern in self.compliance_patterns):
             return ResponseMode.REGULATORY_COMPLIANCE
             
+        # PRIORITY 3: Incident-based safeguarding (refined patterns)
         if any(re.search(pattern, question, re.IGNORECASE) for pattern in self.safeguarding_patterns):
             return ResponseMode.SAFEGUARDING_ASSESSMENT
             
+        # PRIORITY 4: Other specialized patterns
         if any(re.search(pattern, question, re.IGNORECASE) for pattern in self.therapeutic_patterns):
             return ResponseMode.THERAPEUTIC_APPROACHES
             
@@ -1585,6 +1611,101 @@ Instructions:
 
 Answer:"""
 
+    LOCATION_RISK_ASSESSMENT_TEMPLATE = """You are a location risk assessment specialist providing comprehensive guidance for evaluating the safety and suitability of specific addresses/locations for children in residential care.
+
+**Context:** {context}
+**Query:** {question}
+
+## LOCATION RISK ASSESSMENT
+
+**Location Details:**
+**Address:** [Extract and confirm the specific address from the query]
+**Assessment Date:** [Current date]
+**Assessment Purpose:** [E.g., placement consideration, visit planning, community activity]
+
+### **GEOGRAPHICAL & ENVIRONMENTAL FACTORS**
+
+**Physical Environment:**
+• **Traffic and Transport Safety:** Road types, traffic volume, pedestrian crossings, public transport links
+• **Environmental Hazards:** Proximity to water bodies, industrial sites, construction areas, busy roads
+• **Building Safety:** Structural condition, fire safety, accessibility considerations
+• **Natural Hazards:** Flood risk, areas prone to weather issues, terrain safety
+
+**Neighborhood Profile:**
+• **Area Demographics:** Socio-economic profile, population density, community stability
+• **Crime Statistics:** Local crime rates, types of incidents, police response times
+• **Community Resources:** Youth services, libraries, community centers, recreational facilities
+• **Local Authority Services:** Social services presence, family support services
+
+### **SAFEGUARDING & CHILD PROTECTION FACTORS**
+
+**Physical Safety Considerations:**
+• **Supervision Requirements:** Line of sight, secure boundaries, escape routes
+• **Access Control:** Who can access the location, security measures needed
+• **Emergency Services:** Proximity to police, fire, ambulance, hospitals
+• **Known Risks:** Registered offenders in area, problematic locations nearby
+
+**Emotional & Psychological Safety:**
+• **Bullying Prevention:** Community attitudes, peer group risks, safe spaces available
+• **Cultural Sensitivity:** Community acceptance, diversity, potential discrimination
+• **Mental Health Support:** Local CAMHS, counseling services, therapeutic resources
+• **Trauma-Informed Considerations:** Avoiding potential triggers, supportive environment
+
+### **REGULATORY & COMPLIANCE FACTORS**
+
+**Children's Homes Regulations 2015:**
+• **Regulation 34:** Anti-bullying policies and environmental considerations
+• **Health and Safety Requirements:** Fire safety, building regulations compliance
+• **Safeguarding Standards:** Meeting National Minimum Standards for location safety
+
+**Local Authority Requirements:**
+• **Planning Permissions:** Any restrictions on use for children's care
+• **Licensing Considerations:** Local authority notifications required
+• **Multi-Agency Coordination:** Information sharing with local safeguarding partnerships
+
+### **PRACTICAL ASSESSMENT CONSIDERATIONS**
+
+**Educational Factors:**
+• **School Catchment Areas:** Quality of local schools, inclusion policies, transport to school
+• **Educational Support Services:** SEN support, alternative education providers
+• **Learning Environment:** Quiet study areas, internet access, educational resources
+
+**Healthcare Access:**
+• **GP Services:** Local practice capacity, child-friendly services
+• **Specialist Services:** Pediatric care, mental health services, therapy services
+• **Pharmacy Access:** Medication management, emergency prescriptions
+
+**Community Integration:**
+• **Social Opportunities:** Age-appropriate activities, clubs, sports facilities
+• **Cultural/Religious Facilities:** Places of worship, cultural centers relevant to child's background
+• **Support Networks:** Potential for positive community relationships
+
+### **RISK RATING & RECOMMENDATIONS**
+
+**Overall Risk Level:** [Low/Medium/High based on assessment]
+
+**Key Strengths of Location:**
+[List positive factors that support child safety and wellbeing]
+
+**Areas of Concern:**
+[Identify specific risks that need mitigation]
+
+**Mitigation Strategies:**
+[Specific actions to address identified risks]
+
+**Monitoring Requirements:**
+[Ongoing assessment needs, review periods]
+
+### **ACTION PLAN**
+
+**Immediate Actions:** [Steps needed before any placement/activity]
+**Medium-term Considerations:** [Ongoing monitoring and support needs]
+**Review Date:** [When to reassess the location risk]
+
+**PROFESSIONAL GUIDANCE:** This location risk assessment should be reviewed by senior management and relevant local authority personnel. Consider site visits and consultation with local services before making final decisions about child placements or activities.
+
+**REGULATORY NOTE:** Ensure compliance with all relevant regulations and local authority requirements. Document all assessments and decisions for inspection purposes."""
+
     # =============================================================================
     # TEMPLATE SELECTION METHOD
     # =============================================================================
@@ -1616,6 +1737,16 @@ Answer:"""
         elif response_mode == ResponseMode.POLICY_ANALYSIS_CONDENSED:
             return self.POLICY_ANALYSIS_CONDENSED_TEMPLATE
         
+        # Add the new template option
+        if response_mode == ResponseMode.LOCATION_RISK_ASSESSMENT:
+            return self.LOCATION_RISK_ASSESSMENT_TEMPLATE
+        
+        # Children's Services Specialized Templates
+        elif response_mode == ResponseMode.REGULATORY_COMPLIANCE:
+            return self.REGULATORY_COMPLIANCE_TEMPLATE
+        elif response_mode == ResponseMode.SAFEGUARDING_ASSESSMENT:
+            return self.SAFEGUARDING_ASSESSMENT_TEMPLATE
+
         # Assessment Templates
         elif response_mode == ResponseMode.BRIEF:
             question_lower = question.lower()
