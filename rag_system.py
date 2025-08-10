@@ -12,6 +12,10 @@ from dataclasses import dataclass
 from enum import Enum
 import re
 from datetime import datetime
+import base64
+from io import BytesIO
+from PIL import Image
+import requests
 
 # LangChain imports
 from langchain_openai import ChatOpenAI
@@ -22,6 +26,8 @@ from langchain_community.callbacks.manager import get_openai_callback
 
 # Import your working SmartRouter
 from smart_query_router import SmartRouter, create_smart_router
+import time
+from typing import Dict, Any, Optional
 
 # Import from the safeguarding plugin
 from safeguarding_2023_plugin import SafeguardingPlugin
@@ -51,6 +57,8 @@ class ResponseMode(Enum):
     INCIDENT_MANAGEMENT = "incident_management"
     QUALITY_ASSURANCE = "quality_assurance"
     LOCATION_RISK_ASSESSMENT = "location_risk_assessment"
+    IMAGE_ANALYSIS = "image_analysis"
+    IMAGE_ANALYSIS_COMPREHENSIVE = "image_analysis_comprehensive"
 
 class PerformanceMode(Enum):
     SPEED = "fast"
@@ -65,6 +73,277 @@ class QueryResult:
     metadata: Dict[str, Any]
     confidence_score: float = 0.0
     performance_stats: Optional[Dict[str, Any]] = None
+
+# =============================================================================
+# VISION ANALYSIS CAPABILITIES                   
+# =============================================================================
+
+class VisionAnalyzer:
+    """Real image analysis using vision-capable AI models"""
+    
+    def __init__(self):
+        self.openai_vision_available = False
+        self.google_vision_available = False
+        
+        # Check which vision models are available
+        try:
+            import openai
+            if os.environ.get('OPENAI_API_KEY'):
+                self.openai_vision_available = True
+                logger.info("OpenAI Vision (GPT-4V) available")
+        except ImportError:
+            pass
+            
+        try:
+            if os.environ.get('GOOGLE_API_KEY'):
+                self.google_vision_available = True
+                logger.info("Google Vision (Gemini Pro Vision) available")
+        except ImportError:
+            pass
+
+        # ADD THESE LINES:
+        self.smart_router = create_smart_router()
+        self.smart_router.set_performance_mode("balanced")  # Default mode
+    
+    def resize_large_images(self, image_bytes: bytes, filename: str = "", max_size_mb: float = 1.5) -> bytes:
+        """Resize images over max_size_mb for faster processing"""
+        try:
+            from PIL import Image
+            import io
+            
+            current_size_mb = len(image_bytes) / (1024 * 1024)
+            
+            if current_size_mb <= max_size_mb:
+                logger.info(f"Image {filename} ({current_size_mb:.1f}MB) within size limit")
+                return image_bytes
+            
+            # Open and resize image
+            image = Image.open(io.BytesIO(image_bytes))
+            
+            # Calculate new dimensions (maintain aspect ratio)
+            reduction_factor = (max_size_mb / current_size_mb) ** 0.5
+            new_width = int(image.width * reduction_factor)
+            new_height = int(image.height * reduction_factor)
+            
+            # Resize image
+            resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Save to bytes
+            output_buffer = io.BytesIO()
+            format_type = 'JPEG' if image.mode == 'RGB' else 'PNG'
+            resized_image.save(output_buffer, format=format_type, quality=85, optimize=True)
+            resized_bytes = output_buffer.getvalue()
+            
+            new_size_mb = len(resized_bytes) / (1024 * 1024)
+            logger.info(f"Resized {filename}: {current_size_mb:.1f}MB → {new_size_mb:.1f}MB")
+            
+            return resized_bytes
+            
+        except Exception as e:
+            logger.warning(f"Failed to resize image {filename}: {e}")
+            return image_bytes  # Return original if resize fails
+
+    def analyze_image(self, image_bytes, question, context=""):
+        """Analyze image using available vision AI models with smart routing"""
+    
+        # GET ROUTING DECISION
+        routing_decision = self.smart_router.route_multimodal_query(
+            query=question,
+            image_data=image_bytes,
+            image_size_kb=len(image_bytes) // 1024,
+            k=5
+        )
+
+        original_size = len(image_bytes)
+        image_bytes = self.resize_large_images(image_bytes, "uploaded_image", max_size_mb=1.5)
+        if len(image_bytes) < original_size:
+            logger.info(f"Image optimized for fast processing: {original_size//1024}KB → {len(image_bytes)//1024}KB")
+    
+        recommended_vision = routing_decision['vision_model']
+        logger.info(f"Router recommended vision model: {recommended_vision}")
+    
+        # USE EXISTING CODE BUT WITH RECOMMENDED MODEL
+        if 'openai' in recommended_vision and self.openai_vision_available:
+            try:
+                # Use recommended model instead of hardcoded
+                model_name = "gpt-4o-mini" if "mini" in recommended_vision else "gpt-4o"
+                result = self._analyze_with_openai_vision(image_bytes, question, context, model_name)
+                if result and result.get("analysis") and result.get("provider") != "fallback":
+                    logger.info(f"Successfully used OpenAI vision with {model_name}")
+                    return result
+                else:
+                    logger.warning("OpenAI vision returned fallback or empty result")
+            except Exception as e:
+                logger.error(f"OpenAI vision failed completely: {e}")
+
+        if 'google' in recommended_vision and self.google_vision_available:
+            try:
+                logger.info("Trying Google vision")
+                # Use recommended model instead of hardcoded
+                model_name = "gemini-1.5-flash" if "flash" in recommended_vision else "gemini-1.5-pro"
+                result = self._analyze_with_google_vision(image_bytes, question, context, model_name)
+                if result and result.get("analysis"):
+                    logger.info(f"Successfully used Google vision with {model_name}")
+                    return result
+                else:
+                    logger.warning("Google vision returned empty result")
+            except Exception as e:
+                logger.error(f"Google vision failed: {e}")
+            
+        logger.error("All vision providers failed, using text fallback")
+        return self._fallback_analysis(question)
+
+    def _analyze_with_openai_vision(self, image_bytes, question, context, model_name="gpt-4o"):
+        """Analyze image using OpenAI GPT-4 Vision"""
+        try:
+            import openai
+            from openai import OpenAI
+            
+            client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+            
+            # Convert image to base64
+            base64_image = base64.b64encode(image_bytes).decode('utf-8')
+            
+            # IMPROVED vision prompt - more specific but not overwhelming
+            vision_prompt = f"""
+You are a facility safety specialist analyzing this image of a children's residential care facility.
+
+Question: {question}
+Context: {context}
+
+Examine this image carefully and identify specific safety issues you can actually see:
+
+**WHAT I CAN SEE:**
+1. **Fire Safety Issues:**
+   - Are fire exits blocked? By what specific items?
+   - Fire extinguisher location and accessibility
+   - Any fire doors propped open or obstructed?
+
+2. **Immediate Hazards:**
+   - Trip hazards: What objects are creating obstacles?
+   - Electrical risks: Exposed wires, damaged equipment
+   - Structural concerns: Unstable items, fall risks
+
+3. **Specific Violations:**
+   - Blocked emergency exits (describe exactly what's blocking them)
+   - Improper storage creating hazards
+   - Missing or damaged safety equipment
+
+**BE SPECIFIC:** For each issue, state:
+- Exactly what you can see (color, shape, location)
+- Why it's a safety concern
+- What regulation it might breach
+- Immediate action needed
+
+Focus on ACTUAL visible problems, not general safety advice.
+"""
+            
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": vision_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}",
+                                    "detail": "high"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=1500,
+                temperature=0.1
+            )
+            
+            return {
+                "analysis": response.choices[0].message.content,
+                "model_used": model_name,
+                "provider": "openai"
+            }
+            
+        except Exception as e:
+            logger.error(f"OpenAI Vision analysis failed: {e}")
+            return self._fallback_analysis(question)
+    
+    def _analyze_with_google_vision(self, image_bytes, question, context, model_name="gemini-1.5-pro"):
+        """Analyze image using Google Gemini Pro Vision"""
+        try:
+            import google.generativeai as genai
+            
+            genai.configure(api_key=os.environ.get('GOOGLE_API_KEY'))
+            model = genai.GenerativeModel(model_name)
+            
+            # Convert bytes to PIL Image
+            image = Image.open(BytesIO(image_bytes))
+            
+            # Create the vision prompt
+            vision_prompt = f"""
+You are a safety inspector examining this specific image. Look carefully at what is actually visible.
+
+Question: {question}
+Context: {context}
+
+EXAMINE THE IMAGE CAREFULLY and describe exactly what you see:
+
+**FIRE EXIT ANALYSIS:**
+- Is there a fire exit door visible? What color is it?
+- What signage can you see on or near the door?
+- Is the fire exit door blocked or obstructed? By what specific items?
+- Describe the exact objects blocking access (chairs, equipment, barriers, etc.)
+- What colors and shapes are these obstructing items?
+
+**SAFETY EQUIPMENT:**
+- Can you see any fire extinguishers? Where exactly are they mounted?
+- What type and color are the extinguishers?
+- Are they easily accessible or blocked?
+
+**SPECIFIC HAZARDS YOU CAN SEE:**
+- Any metal frames, barriers, or equipment blocking pathways?
+- Stacked furniture or objects that could fall or trip someone?
+- Clothing, bags, or loose items that could cause hazards?
+- Any electrical equipment or wiring visible?
+
+**EXACT DESCRIPTION:**
+For each safety issue, state:
+- "I can see [specific item/color/shape] located [exact position]"
+- "This creates a hazard because [specific reason]"
+- "The immediate risk is [specific danger]"
+
+DO NOT give general safety advice. Only describe what you can actually observe in this specific image.
+"""
+            
+            response = model.generate_content([vision_prompt, image])
+            
+            return {
+                "analysis": response.text,
+                "model_used": model_name, 
+                "provider": "google"
+            }
+            
+        except Exception as e:
+            logger.error(f"Google Vision analysis failed: {e}")
+            return self._fallback_analysis(question)
+    
+    def _fallback_analysis(self, question):
+        """Fallback when no vision models available"""
+        return {
+            "analysis": "Image analysis not available - no vision-capable AI models configured. Please ensure OpenAI GPT-4 Vision or Google Gemini Pro Vision is properly configured.",
+            "model_used": "none",
+            "provider": "fallback"
+        }
+
+    def set_performance_mode(self, mode: str):
+        """Set performance mode: 'speed', 'balanced', or 'quality'"""
+        if hasattr(self, 'smart_router'):
+            self.smart_router.set_performance_mode(mode)
+            logger.info(f"Vision performance mode set to: {mode}")
+        else:
+            logger.warning("Smart router not initialized") 
+
 
 # =============================================================================
 # SMART RESPONSE DETECTOR
@@ -299,102 +578,141 @@ class SmartResponseDetector:
         ]
 
     def _detect_file_type_from_question(self, question: str) -> Optional[str]:
-        """Detect file type from question content for better template selection"""
+        """Detect file type with IMAGES as priority - reflecting real-world usage patterns"""
         
-        # Look for file type indicators in the question
+        # PRIORITY 1: IMAGE ANALYSIS - Most common uploads for compliance/hazard reporting
+        # Direct image file detection
         if re.search(r'\bIMAGE FILE:\s*.*\.(png|jpg|jpeg)', question, re.IGNORECASE):
             return "image_analysis"
         
-        # SMART OFSTED DETECTION: Only for actual report analysis, not general guidance
-        # Look for indicators that this is analyzing an existing Ofsted report
+        # Image analysis keywords in questions
+        image_analysis_indicators = [
+            r'\banalyze?\s+(?:this|these)\s+image[s]?\b',
+            r'\bvisual\s+analysis\b',
+            r'\bphoto\s+analysis\b',
+            r'\bfacility\s+photo[s]?\b',
+            r'\bimage[s]?\s+of\s+(?:the\s+)?(?:kitchen|bedroom|facility|home|room)\b',
+            r'\bassess\s+(?:this|these)\s+image[s]?\b',
+            r'\banalyze?\s+(?:the\s+)?(?:kitchen|dining|facility|room)\s+photo\b',
+            r'\bvisual\s+assessment\b',
+            r'\bphoto\s+review\b',
+            r'\bfacility\s+inspection\s+image[s]?\b',
+            r'\bhazard\s+photo[s]?\b',
+            r'\bcompliance\s+image[s]?\b',
+            r'\bsafety\s+photo[s]?\b',
+            r'\bmaintenance\s+image[s]?\b',
+            r'\bcheck\s+(?:this|these)\s+image[s]?\b',
+            r'\breview\s+(?:this|these)\s+photo[s]?\b',
+            r'\binspect\s+(?:this|these)\s+image[s]?\b',
+        ]
+        
+        # If any image analysis indicators found, prioritize image analysis
+        if any(re.search(pattern, question, re.IGNORECASE) for pattern in image_analysis_indicators):
+            return "image_analysis"
+        
+        # PRIORITY 2: OFSTED REPORTS - Only when clearly analyzing existing inspection reports
+        # These should be very specific to avoid false positives
         ofsted_report_indicators = [
             r'\bDOCUMENT:\s*.*ofsted.*report\b',
             r'\bDOCUMENT:\s*.*inspection.*report\b',
-            r'\bDOCUMENT:\s*.*children.*home.*inspection\b',
             r'\bDOCUMENT:\s*.*\.pdf.*ofsted\b',
-            # Look for phrases indicating analysis of an existing report
             r'\bbased\s+on\s+(?:the\s+)?ofsted\s+report\b',
             r'\bfrom\s+(?:the\s+)?ofsted\s+report\b',
-            r'\baccording\s+to\s+(?:the\s+)?ofsted\s+report\b',
-            r'\bfindings\s+from\s+(?:the\s+)?ofsted\s+report\b',
+            r'\banalyze?\s+(?:this\s+)?ofsted\s+report\b',
+            r'\bofsted\s+inspection\s+analysis\b',
             r'\bthis\s+ofsted\s+report\b',
             r'\bthe\s+ofsted\s+report\b',
-            r'\banalyze?\s+(?:this\s+)?ofsted\s+report\b',
-            r'\bsummary\s+(?:of\s+)?(?:findings\s+from\s+)?ofsted\s+report\b',
-            r'\banalysis\s+(?:of\s+)?(?:findings\s+from\s+)?ofsted\s+report\b',
-            r'\bactions\s+.*\bofsted\s+report\b',
-            r'\bimprovements?\s+.*\bofsted\s+report\b',
-            r'\brecommendations?\s+.*\bofsted\s+report\b',
-            # Look for Ofsted-specific content in uploaded documents
+            # Specific Ofsted content indicators
+            r'\bprovider\s+overview\b.*\brating[s]?\b',
             r'\boverall experiences and progress\b',
             r'\beffectiveness of leaders and managers\b',
-            r'\bhow well children.*are helped and protected\b',
             r'\brequires improvement to be good\b',
-            r'\boutstanding.*children.*home\b',
-            r'\bgood.*children.*home\b',
-            r'\binadequate.*children.*home\b',
         ]
         
-        # Only return ofsted_report if we find indicators of actual report analysis
         if any(re.search(pattern, question, re.IGNORECASE) for pattern in ofsted_report_indicators):
             return "ofsted_report"
         
-        # Look for policy documents
-        if re.search(r'\bDOCUMENT:\s*.*policy\b', question, re.IGNORECASE):
+        # PRIORITY 3: POLICY DOCUMENTS - Clear policy analysis requests
+        policy_indicators = [
+            r'\bDOCUMENT:\s*.*policy\b',
+            r'\bDOCUMENT:\s*.*procedure\b',
+            r'\bDOCUMENT:\s*.*guidance\b',
+            r'\bpolicy\s+analysis\b',
+            r'\bpolicy\s+review\b',
+            r'\banalyze?\s+(?:this\s+)?policy\b',
+        ]
+        
+        if any(re.search(pattern, question, re.IGNORECASE) for pattern in policy_indicators):
             return "policy_document"
         
-        if re.search(r'\bDOCUMENT:\s*.*procedure\b', question, re.IGNORECASE):
-            return "policy_document"
-        
-        if re.search(r'\bDOCUMENT:\s*.*guidance\b', question, re.IGNORECASE):
-            return "policy_document"
-        
-        # General document analysis
+        # PRIORITY 4: GENERAL DOCUMENTS - Fallback for other document types
         if re.search(r'\bDOCUMENT:\s*.*\.pdf', question, re.IGNORECASE):
             return "document_analysis"
         
         if re.search(r'\bDOCUMENT:\s*.*\.docx', question, re.IGNORECASE):
             return "document_analysis"
         
-        # Look for visual analysis requests
-        if re.search(r'\bvisual analysis requested\b', question, re.IGNORECASE):
-            return "image_analysis"
-        
         return None
     
     def determine_response_mode(self, question: str, requested_style: str = "standard", 
-                              is_file_analysis: bool = False) -> ResponseMode:
-        """Intelligently determine the best response mode"""
+                              is_file_analysis: bool = False, 
+                              document_type: str = None, document_confidence: float = 0.0) -> ResponseMode:
+        """Enhanced with automatic document type detection override"""
         question_lower = question.lower()
         
-        # PRIORITY 0: File type detection from uploaded content - ENHANCED FOR OFSTED
+        # PRIORITY 0: Document-based detection (TOP PRIORITY)
+        if document_type and document_confidence > 0.5:
+            # High-confidence document detection overrides everything
+            if document_type in [mode.value for mode in ResponseMode]:
+                logger.info(f"Document-based override: {document_type} "
+                           f"(confidence: {document_confidence:.2f})")
+                return ResponseMode(document_type)
+        
+        # PRIORITY 1: Honor explicit user requests for specific analysis types
+        if self._is_ofsted_analysis(question_lower):
+            logger.info("Explicit Ofsted analysis request detected")
+            return ResponseMode.OFSTED_ANALYSIS
+        elif self._is_policy_analysis(question_lower):
+            logger.info("Explicit policy analysis request detected")
+            return ResponseMode.POLICY_ANALYSIS
+        elif self._is_assessment_scenario(question_lower):
+            logger.info("Assessment scenario detected")
+            return ResponseMode.BRIEF
+        
+        # PRIORITY 2: File type detection from uploaded content    
         if is_file_analysis:
             file_type = self._detect_file_type_from_question(question)
+            
             if file_type == "image_analysis":
-                logger.info("Image analysis detected from uploaded files")
-                return ResponseMode.COMPREHENSIVE  # Use comprehensive for image analysis
-            elif file_type == "ofsted_report":
-                logger.info("Ofsted report detected from uploaded files - using structured template")
-                return ResponseMode.OFSTED_ANALYSIS  # ALWAYS use structured format for Ofsted
-            elif file_type == "policy_document":
-                logger.info("Policy document detected from uploaded files")
-                return ResponseMode.POLICY_ANALYSIS
-            elif file_type == "document_analysis":
-                logger.info("General document analysis detected")
-                return ResponseMode.COMPREHENSIVE
+                # Smart detection: comprehensive vs staff daily use
+                comprehensive_indicators = [
+                    r'\bcomprehensive\s+(?:analysis|assessment|review)\b',
+                    r'\bdetailed\s+(?:analysis|assessment|inspection)\b',
+                    r'\bthorough\s+(?:analysis|assessment|review)\b',
+                    r'\bmanagement\s+(?:review|assessment|analysis)\b',
+                    r'\binspection\s+(?:preparation|prep|ready)\b',
+                    r'\bprepare\s+for\s+(?:inspection|ofsted|visit)\b',
+                    r'\bfull\s+(?:assessment|analysis|review)\b',
+                    r'\bregulatory\s+(?:assessment|compliance|review)\b',
+                    r'\bfacility\s+(?:assessment|audit|review)\b',
+                    r'\bsenior\s+management\b',
+                    r'\bexecutive\s+(?:summary|review)\b',
+                ]
+                
+                if any(re.search(pattern, question_lower, re.IGNORECASE) for pattern in comprehensive_indicators):
+                    logger.info("Comprehensive image analysis detected - management/inspection focus")
+                    return ResponseMode.IMAGE_ANALYSIS_COMPREHENSIVE
+                else:
+                    logger.info("Standard image analysis detected - staff daily use")
+                    return ResponseMode.IMAGE_ANALYSIS
+            
+            # For other file types, use document detection if available
+            elif document_type and document_confidence > 0.3:  # Lower threshold for files
+                logger.info(f"Using document detection for file: {document_type}")
+                if document_type in [mode.value for mode in ResponseMode]:
+                    return ResponseMode(document_type)
         
-        # PRIORITY 1: Ofsted analysis detection from question content (even without files)
-        if self._is_ofsted_analysis(question_lower):
-            logger.info("Ofsted analysis detected from question content - using structured template")
-            return ResponseMode.OFSTED_ANALYSIS  # ALWAYS use structured format
-        
-        # PRIORITY 2: Children's Services Specialized Patterns
-        specialized_mode = self._detect_specialized_mode(question_lower)
-        if specialized_mode:
-            logger.info(f"Specialized children's services mode detected: {specialized_mode.value}")
-            return specialized_mode
-        
-        # PRIORITY 3: Policy analysis
+        # PRIORITY 3: Policy analysis (before specialized patterns)
         if self._is_policy_analysis(question_lower):
             if self._is_condensed_request(question_lower):
                 logger.info("Condensed policy analysis detected")
@@ -403,19 +721,25 @@ class SmartResponseDetector:
                 logger.info("Comprehensive policy analysis detected")
                 return ResponseMode.POLICY_ANALYSIS
         
-        # PRIORITY 4: File analysis
+        # PRIORITY 4: Children's Services Specialized Patterns
+        specialized_mode = self._detect_specialized_mode(question_lower)
+        if specialized_mode:
+            logger.info(f"Specialized children's services mode detected: {specialized_mode.value}")
+            return specialized_mode
+        
+        # PRIORITY 5: File analysis
         if is_file_analysis:
             if self._is_comprehensive_analysis_request(question_lower):
                 return ResponseMode.COMPREHENSIVE
             else:
                 return ResponseMode.STANDARD
         
-        # PRIORITY 5: Assessment scenarios (Signs of Safety)
+        # PRIORITY 6: Assessment scenarios (Signs of Safety)
         if self._is_assessment_scenario(question_lower):
             logger.info("Assessment scenario detected - using brief mode")
             return ResponseMode.BRIEF
         
-        # PRIORITY 6: Honor explicit requests
+        # PRIORITY 7: Honor explicit requests
         if requested_style in [mode.value for mode in ResponseMode]:
             requested_mode = ResponseMode(requested_style)
             if (requested_mode == ResponseMode.STANDARD and 
@@ -423,20 +747,21 @@ class SmartResponseDetector:
                 return ResponseMode.BRIEF
             return requested_mode
             
-        # PRIORITY 7: Specific answer requests
+        # PRIORITY 8: Specific answer requests
         if self._is_specific_answer_request(question_lower):
             return ResponseMode.BRIEF
         
-        # PRIORITY 8: Comprehensive analysis requests
+        # PRIORITY 9: Comprehensive analysis requests
         if self._is_comprehensive_analysis_request(question_lower):
             return ResponseMode.COMPREHENSIVE
             
-        # PRIORITY 9: Simple factual questions
+        # PRIORITY 10: Simple factual questions
         if self._is_simple_factual_question(question_lower):
             return ResponseMode.SIMPLE
             
         # DEFAULT: Standard mode
         return ResponseMode.STANDARD
+
     
     def _detect_specialized_mode(self, question: str) -> Optional[ResponseMode]:
         """Detect specialized children's services modes - ENHANCED VERSION"""
@@ -1422,7 +1747,7 @@ class PromptTemplateManager:
 **QUALITY PRINCIPLE:** This comprehensive framework supports the journey to Outstanding quality. Quality assurance should focus on improving outcomes for children and young people, driving innovation, and contributing to sector excellence. It should be embedded throughout the organization and drive continuous improvement."""
 
     # =============================================================================
-    # EXISTING DOCUMENT ANALYSIS TEMPLATES (UNCHANGED)
+    # EXISTING DOCUMENT AND IMAGE ANALYSIS TEMPLATES (UNCHANGED)
     # =============================================================================
     
     OFSTED_ANALYSIS_TEMPLATE = """You are an expert education analyst specializing in Ofsted inspection reports. Extract and analyze information from Ofsted reports in the following structured format:
@@ -1551,6 +1876,191 @@ class PromptTemplateManager:
 - Flag missing version control, overdue reviews, or regulatory gaps
 - Consider practical implementation for children's home staff
 - Identify serious concerns that could impact child welfare or Ofsted ratings"""
+
+    IMAGE_ANALYSIS_TEMPLATE = """You are a facility safety specialist providing clear, actionable guidance for children's home staff.
+
+**Context:** {context}
+**Query:** {question}
+
+Based on the visual analysis, provide a clean, practical safety assessment:
+
+## 🚨 IMMEDIATE ACTIONS (Fix Today)
+[List only urgent safety issues that need immediate attention - maximum 3 items]
+
+## ⚠️ THIS WEEK 
+[List important items to address within 7 days - maximum 3 items]
+
+## ✅ POSITIVE OBSERVATIONS
+[Highlight 2-3 good safety practices or well-maintained areas]
+
+## 📞 WHO TO CONTACT
+[Only list if specific contractors or managers need to be involved]
+
+## 📝 SUMMARY
+[One clear sentence about overall safety status and main priority]
+
+**IMPORTANT:** This is a visual safety check. Always follow your home's safety procedures and use professional judgment for any safety decisions."""
+
+    IMAGE_ANALYSIS_COMPREHENSIVE_TEMPLATE = """You are a senior facility assessment specialist conducting a comprehensive visual inspection for children's residential care settings. Provide detailed analysis suitable for management review and inspection preparation.
+
+**Context:** {context}
+**Query:** {question}
+
+## COMPREHENSIVE FACILITY ASSESSMENT
+
+**Assessment Overview:**
+**Images Analyzed:** [Number of images provided]
+**Assessment Type:** Comprehensive management review and inspection preparation
+**Assessment Date:** [Current date]
+**Review Purpose:** [Management oversight, inspection preparation, compliance audit]
+
+### **EXECUTIVE SUMMARY**
+[2-3 sentence overview of overall facility condition and key findings]
+
+### **CRITICAL SAFETY ASSESSMENT**
+
+**Category A - Immediate Intervention Required:**
+• **Life Safety Issues:** Fire exits, electrical hazards, structural risks, fall hazards
+• **Child Protection Concerns:** Access security, dangerous items, supervision risks
+• **Regulatory Non-Compliance:** Items that would trigger inspection failures
+• **Timeline:** Immediate action required (0-24 hours)
+
+**Category B - Priority Maintenance (1-4 weeks):**
+• **Safety Maintenance:** Worn equipment, minor electrical issues, cleaning deep-cleans
+• **Compliance Improvements:** Items approaching regulatory concern levels
+• **Environmental Quality:** Issues affecting daily operations and child experience
+• **Timeline:** Scheduled maintenance required within one month
+
+**Category C - Planned Improvements (1-6 months):**
+• **Preventive Maintenance:** Items requiring future attention to prevent deterioration
+• **Enhancement Opportunities:** Upgrades that improve quality beyond minimum standards
+• **Aesthetic Improvements:** Environmental enhancements for better child experience
+• **Timeline:** Include in maintenance planning and budget cycles
+
+### **REGULATORY COMPLIANCE ANALYSIS**
+
+**Children's Homes Regulations 2015:**
+• **Regulation 12 (Protection of children):** Safety measures, risk management
+• **Regulation 15 (Physical environment):** Accommodation standards, maintenance
+• **Regulation 16 (Health and safety):** Risk assessments, safety measures
+• **Regulation 17 (Fire precautions):** Fire safety equipment, evacuation routes
+
+**Health & Safety Legislation:**
+• **HASAWA 1974:** General workplace safety obligations
+• **Fire Safety Regulations:** Emergency procedures, equipment, signage
+• **Building Regulations:** Structural safety, accessibility, ventilation
+• **Food Safety:** Kitchen hygiene, temperature control, pest management
+
+**National Minimum Standards:**
+• **Standard 6:** Physical environment quality and maintenance
+• **Standard 10:** Promoting health and safety
+• **Standard 15:** Premises and accommodation standards
+
+### **DETAILED AREA ASSESSMENTS**
+
+**Living Spaces (Bedrooms, Lounges, Study Areas):**
+• **Physical Safety:** Furniture stability, electrical safety, window security, heating
+• **Environmental Quality:** Lighting, ventilation, noise control, privacy
+• **Maintenance Status:** Decoration, wear patterns, deep cleaning needs
+• **Child Experience:** Homeliness, personalization opportunities, comfort
+
+**Operational Areas (Kitchen, Bathrooms, Utility):**
+• **Hygiene Standards:** Deep cleaning, sanitization, pest control, ventilation
+• **Equipment Safety:** Appliance condition, electrical safety, mechanical function
+• **Regulatory Compliance:** Food safety, water temperature, accessibility
+• **Efficiency Assessment:** Workflow, storage, maintenance access
+
+**Common Areas (Dining, Reception, Corridors):**
+• **Accessibility:** Wheelchair access, mobility aids, emergency evacuation
+• **Security:** Access control, visitor management, CCTV functionality
+• **Professional Presentation:** First impressions, organizational image
+• **Functional Design:** Traffic flow, supervision sight lines, activity zones
+
+**External Areas (Gardens, Car Parks, Boundaries):**
+• **Boundary Security:** Fencing, gates, access control, sight lines
+• **Recreational Safety:** Play equipment, surfaces, supervision areas
+• **Vehicle Safety:** Parking, access routes, pedestrian separation
+• **Environmental Hazards:** Water features, plants, storage areas
+
+### **RISK ASSESSMENT MATRIX**
+
+**High Risk Issues:**
+[Detailed analysis of items requiring immediate management attention]
+
+**Medium Risk Issues:**
+[Items requiring scheduled attention within defined timeframes]
+
+**Low Risk Issues:**
+[Maintenance items for routine scheduling and budget planning]
+
+### **INSPECTION READINESS ASSESSMENT**
+
+**Ofsted Inspection Preparedness:**
+• **Physical Environment Rating Factors:** Areas that directly impact inspection grades
+• **Evidence Documentation:** Photo evidence of compliance and improvements
+• **Outstanding Practice Examples:** Areas demonstrating excellence beyond minimum standards
+• **Potential Inspection Concerns:** Items that could negatively impact assessment
+
+**Action Plan for Inspection Preparation:**
+1. **Critical Items:** Must be addressed before any inspection
+2. **Enhancement Opportunities:** Items that could elevate inspection ratings
+3. **Documentation Requirements:** Evidence gathering and record keeping needs
+
+### **RESOURCE PLANNING**
+
+**Contractor Requirements:**
+• **Immediate:** Qualified tradespeople needed for urgent items
+• **Planned:** Specialist services for scheduled maintenance
+• **Budget Implications:** Cost estimates for different priority categories
+
+**Staff Resource Allocation:**
+• **Training Needs:** Areas where staff development could prevent future issues
+• **Supervision Requirements:** Enhanced oversight needed for specific areas
+• **Maintenance Capacity:** Internal vs external resource requirements
+
+**Budget Planning:**
+• **Emergency Repairs:** Immediate expenditure requirements
+• **Maintenance Budget:** Routine maintenance cost projections
+• **Capital Improvements:** Major upgrade investments for quality enhancement
+
+### **QUALITY ASSURANCE RECOMMENDATIONS**
+
+**Monitoring Systems:**
+• **Regular Inspection Schedules:** Frequency and scope of ongoing assessments
+• **Documentation Standards:** Record keeping for continuous improvement
+• **Performance Indicators:** Metrics for tracking facility condition trends
+
+**Continuous Improvement:**
+• **Best Practice Implementation:** Learning from excellence examples
+• **Preventive Strategies:** Systems to avoid future issues
+• **Innovation Opportunities:** Technology or process improvements
+
+### **MANAGEMENT ACTION PLAN**
+
+**Immediate Management Actions (0-48 hours):**
+1. [Specific actions requiring senior management intervention]
+2. [Resource allocation decisions needed]
+3. [External contractor coordination required]
+
+**Short-term Strategic Actions (1-4 weeks):**
+1. [Planned maintenance scheduling and resource allocation]
+2. [Staff development and training initiatives]
+3. [Policy or procedure updates needed]
+
+**Long-term Planning (1-6 months):**
+1. [Capital improvement planning and budget development]
+2. [Strategic facility enhancement initiatives]
+3. [Inspection preparation timeline and milestones]
+
+### **PROFESSIONAL CERTIFICATION**
+
+**Assessment Standards:** This assessment follows Children's Homes Regulations 2015, National Minimum Standards, and current Health & Safety legislation.
+
+**Limitation Notice:** Visual assessment only - full compliance verification requires physical inspection, documentation review, and consultation with operational staff.
+
+**Review Recommendations:** Schedule follow-up assessment after remedial actions and before regulatory inspection to verify improvements and identify any additional considerations.
+
+**MANAGEMENT NOTE:** This comprehensive assessment provides detailed analysis for strategic planning and inspection preparation. Prioritize actions according to risk levels and regulatory requirements. Maintain documentation of all remedial actions for inspection evidence."""
 
     # =============================================================================
     # GENERAL TEMPLATES (UNCHANGED)
@@ -1728,6 +2238,10 @@ Answer:"""
             return self.INCIDENT_MANAGEMENT_TEMPLATE
         elif response_mode == ResponseMode.QUALITY_ASSURANCE:
             return self.QUALITY_ASSURANCE_TEMPLATE
+        elif response_mode == ResponseMode.IMAGE_ANALYSIS:
+            return self.IMAGE_ANALYSIS_TEMPLATE
+        elif response_mode == ResponseMode.IMAGE_ANALYSIS_COMPREHENSIVE:
+            return self.IMAGE_ANALYSIS_COMPREHENSIVE_TEMPLATE
         
         # Document Analysis Templates
         elif response_mode == ResponseMode.OFSTED_ANALYSIS:
@@ -1862,6 +2376,9 @@ class HybridRAGSystem:
         self.prompt_manager = PromptTemplateManager()
         self.conversation_memory = ConversationMemory()
         self.safeguarding_plugin = SafeguardingPlugin()
+
+        # ADD THIS LINE - Initialize VisionAnalyzer
+        self.vision_analyzer = VisionAnalyzer()
         
         # Initialize LLM models for optimization
         self._initialize_llms()
@@ -1872,7 +2389,8 @@ class HybridRAGSystem:
             "successful_queries": 0,
             "avg_response_time": 0,
             "mode_usage": {},
-            "cache_hits": 0
+            "cache_hits": 0,
+            "vision_analyses": 0
         }
         
         logger.info("Enhanced Hybrid RAG System initialized successfully with Children's Services specialization")
@@ -1923,24 +2441,60 @@ class HybridRAGSystem:
     # ==========================================================================
     
     def query(self, question: str, k: int = 5, response_style: str = "standard", 
-              performance_mode: str = "balanced", **kwargs) -> Dict[str, Any]:
+          performance_mode: str = "balanced", uploaded_files: List = None, 
+          uploaded_images: List = None, **kwargs) -> Dict[str, Any]:
         """
-        MAIN QUERY METHOD: Streamlit-compatible interface with enhanced children's services capabilities
-        
-        This is the method your Streamlit app calls with the exact signature expected
+        Enhanced query method supporting BOTH document analysis AND image analysis
+        WITH AUTOMATIC DOCUMENT TYPE DETECTION
         """
         start_time = time.time()
         
         try:
-            # Step 1: Intelligent response mode detection
-            is_file_analysis = kwargs.get('is_file_analysis', False)
+            # Check if this involves file analysis
+            has_files = uploaded_files and len(uploaded_files) > 0
+            has_images = uploaded_images and len(uploaded_images) > 0
+            is_file_analysis = has_files or has_images
+
+            # Document-based detection for uploaded files
+            detected_document_type = None
+            document_confidence = 0.0
+            
+            if has_files:
+                logger.info(f"Analyzing {len(uploaded_files)} uploaded document(s) for type detection")
+                document_analysis = self.analyze_uploaded_document(uploaded_files[0])
+                detected_document_type = document_analysis['recommended_template']
+                document_confidence = document_analysis['confidence']
+                
+                logger.info(f"Document analysis: {document_analysis['document_type']} "
+                           f"(confidence: {document_confidence:.2f}) -> {detected_document_type}")
+                
+                # Override response_style if confident detection
+                if document_confidence > 0.5:
+                    response_style = detected_document_type
+                    logger.info(f"Document-based override: Using {response_style} template "
+                               f"(confidence: {document_confidence:.2f})")
+
+            # Process images if provided (vision AI)
+            vision_analysis = None
+            if has_images:
+                logger.info(f"Processing {len(uploaded_images)} image(s) for visual analysis")
+                if len(uploaded_images) > 1:
+                    vision_analysis = self._process_images_parallel(uploaded_images, question)
+                else:
+                    vision_analysis = self._process_images(uploaded_images, question)
+                is_file_analysis = True
+                self.performance_metrics["vision_analyses"] += 1
+            
+            # Intelligent response mode detection WITH document context
             detected_mode = self.response_detector.determine_response_mode(
-                question, response_style, is_file_analysis
+                question, response_style, is_file_analysis, 
+                document_type=detected_document_type,
+                document_confidence=document_confidence
             )
             
             logger.info(f"Processing query with mode: {detected_mode.value}")
             
-            # Step 2: Use SmartRouter for stable document retrieval
+            # Get document context from SmartRouter
             routing_result = self._safe_retrieval(question, k)
             
             if not routing_result["success"]:
@@ -1948,23 +2502,26 @@ class HybridRAGSystem:
                     question, f"Document retrieval failed: {routing_result['error']}", start_time
                 )
             
-            # Step 3: Process documents and build context
+            # Process documents and build context
             processed_docs = self._process_documents(routing_result["documents"])
             context_text = self._build_context(processed_docs)
             
-            # Step 4: Get optimal model configuration
+            # Build enhanced prompt
+            prompt = self._build_vision_enhanced_prompt(
+                question, context_text, detected_mode, vision_analysis
+            )
+            
+            # Get optimal model configuration  
             model_config = self.llm_optimizer.select_model_config(
                 performance_mode, detected_mode.value
             )
             
-            # Step 5: Enhanced prompt building
-            prompt = self._build_optimized_prompt(question, context_text, detected_mode)
-            
-            # Step 6: Generate response with optimal model
+            # Generate response
             answer_result = self._generate_optimized_answer(
                 prompt, model_config, detected_mode, performance_mode
             )
             
+            # Create comprehensive response
             response = self._create_streamlit_response(
                 question=question,
                 answer=answer_result["answer"],
@@ -1972,10 +2529,11 @@ class HybridRAGSystem:
                 routing_info=routing_result,
                 model_info=answer_result,
                 detected_mode=detected_mode.value,
+                vision_analysis=vision_analysis,
                 start_time=start_time
             )
             
-            # Step 7: Update conversation memory and metrics
+            # Update conversation memory and metrics
             self.conversation_memory.add_exchange(question, answer_result["answer"])
             self._update_metrics(True, time.time() - start_time, detected_mode.value)
             
@@ -1985,7 +2543,8 @@ class HybridRAGSystem:
             logger.error(f"Hybrid query failed: {str(e)}")
             self._update_metrics(False, time.time() - start_time, "error")
             return self._create_error_response(question, str(e), start_time)
-    
+            
+
     def _safe_retrieval(self, question: str, k: int) -> Dict[str, Any]:
         """Use SmartRouter for stable document retrieval - avoids FAISS issues"""
         try:
@@ -2009,6 +2568,222 @@ class HybridRAGSystem:
                 "documents": []
             }
     
+    def analyze_uploaded_document(self, uploaded_file) -> Dict[str, Any]:
+        """Analyze uploaded document to determine type and optimal processing"""
+        try:
+            uploaded_file.seek(0)
+            file_bytes = uploaded_file.read()
+            uploaded_file.seek(0)  # Reset for later processing
+            
+            # Extract text content for analysis
+            if uploaded_file.name.lower().endswith('.pdf'):
+                content_preview = self._extract_pdf_text_preview(file_bytes)
+            elif uploaded_file.name.lower().endswith(('.docx', '.doc')):
+                content_preview = self._extract_docx_text_preview(file_bytes)
+            elif uploaded_file.name.lower().endswith('.txt'):
+                content_preview = file_bytes.decode('utf-8', errors='ignore')[:2000]
+            else:
+                content_preview = ""
+            
+            doc_analysis = self._classify_document_type(content_preview, uploaded_file.name)
+            logger.info(f"Document analysis: {uploaded_file.name} -> {doc_analysis['document_type']}")
+            return doc_analysis
+            
+        except Exception as e:
+            logger.error(f"Document analysis failed for {uploaded_file.name}: {e}")
+            return {"document_type": "general", "confidence": 0.0, "recommended_template": "standard"}
+
+    def _extract_pdf_text_preview(self, file_bytes: bytes, max_chars: int = 2000) -> str:
+        """Extract text preview from PDF for document classification"""
+        try:
+            import PyPDF2
+            import io
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            text_content = ""
+            
+            for page_num in range(min(3, len(pdf_reader.pages))):
+                page = pdf_reader.pages[page_num]
+                text_content += page.extract_text() + "\n"
+                if len(text_content) > max_chars:
+                    break
+            
+            return text_content[:max_chars]
+        except Exception as e:
+            logger.warning(f"PDF text extraction failed: {e}")
+            return ""
+
+    def _extract_docx_text_preview(self, file_bytes: bytes, max_chars: int = 2000) -> str:
+        """Extract text preview from DOCX for document classification"""
+        try:
+            from docx import Document
+            import io
+            doc = Document(io.BytesIO(file_bytes))
+            text_content = ""
+            
+            for paragraph in doc.paragraphs:
+                text_content += paragraph.text + "\n"
+                if len(text_content) > max_chars:
+                    break
+            
+            return text_content[:max_chars]
+        except Exception as e:
+            logger.warning(f"DOCX text extraction failed: {e}")
+            return ""
+
+    def _classify_document_type(self, content: str, filename: str) -> Dict[str, Any]:
+        """Enhanced document classification with better pattern matching"""
+        content_lower = content.lower()
+        filename_lower = filename.lower()
+        
+        # ENHANCED Ofsted Report Detection
+        ofsted_indicators = [
+            # Direct Ofsted mentions
+            r'\bofsted\s+inspection\s+report\b',
+            r'\bofsted\s+children\'?s\s+home\s+inspection\b',
+            r'\binspection\s+of\s+[^.]*children\'?s\s+home\b',
+            
+            # Ofsted-specific structure and language
+            r'\boverall\s+experiences?\s+and\s+progress\s+of\s+children\b',
+            r'\beffectiveness\s+of\s+leaders?\s+and\s+managers?\b',
+            r'\bhow\s+well\s+children\s+.*\s+are\s+helped\s+and\s+protected\b',
+            r'\bregistered\s+manager:?\s*[A-Z][a-z]+\s+[A-Z][a-z]+',  # Name pattern
+            r'\bresponsible\s+individual:?\s*[A-Z][a-z]+\s+[A-Z][a-z]+',
+            
+            # Inspection-specific content
+            r'\binspection\s+date:?\s*\d+',
+            r'\bpublication\s+date:?\s*\d+',
+            r'\bunique\s+reference\s+number:?\s*\w+',
+            r'\btype\s+of\s+inspection:?\s*full\s+inspection\b',
+            
+            # Ofsted ratings and judgments
+            r'\b(?:outstanding|good|requires\s+improvement|inadequate)\b.*\b(?:rating|judgment|grade)\b',
+            r'\boverall\s+(?:rating|judgment|grade|effectiveness)\b',
+            r'\brequires\s+improvement\s+to\s+be\s+good\b',
+            
+            # Compliance and regulatory language specific to Ofsted
+            r'\bcompliance\s+notice\b',
+            r'\benforcement\s+action\b',
+            r'\bstatutory\s+notice\b',
+            r'\bwelfare\s+requirement\s+notice\b',
+        ]
+        
+        # Count matches and apply weights
+        ofsted_score = 0
+        for pattern in ofsted_indicators:
+            matches = len(re.findall(pattern, content_lower))
+            if matches > 0:
+                # Weight different patterns differently
+                if 'ofsted' in pattern:
+                    ofsted_score += matches * 3  # High weight for direct Ofsted mentions
+                elif 'rating' in pattern or 'judgment' in pattern:
+                    ofsted_score += matches * 2  # Medium weight for rating language
+                else:
+                    ofsted_score += matches * 1  # Normal weight
+        
+        # Filename boost
+        if any(term in filename_lower for term in ['ofsted', 'inspection']):
+            ofsted_score += 3
+        
+        # Calculate confidence
+        ofsted_confidence = min(0.95, 0.3 + (ofsted_score * 0.1))
+        
+        if ofsted_score >= 3:  # Lower threshold but with confidence scoring
+            return {
+                "document_type": "ofsted_report",
+                "confidence": ofsted_confidence,
+                "recommended_template": "ofsted_analysis",
+                "detection_score": ofsted_score
+            }
+        
+        # ENHANCED Policy Document Detection
+        policy_indicators = [
+            # Policy document structure
+            r'\bpolicy\s+(?:and\s+)?procedures?\s+(?:for|regarding)\b',
+            r'\b(?:this\s+)?policy\s+(?:document\s+)?(?:covers|outlines|sets\s+out)\b',
+            r'\bpurpose\s+of\s+(?:this\s+)?policy\b',
+            r'\bscope\s+of\s+(?:this\s+)?policy\b',
+            
+            # Version control and governance
+            r'\bversion\s+(?:number\s+)?\d+\.\d+\b',
+            r'\bversion\s+control\b',
+            r'\breview\s+date:?\s*\d+',
+            r'\bnext\s+review\s+date:?\s*\d+',
+            r'\bapproved\s+by:?\s*[A-Z]',
+            r'\bdate\s+approved:?\s*\d+',
+            
+            # Policy-specific content
+            r'\bchildren\'?s\s+homes?\s+regulations?\s+2015\b',
+            r'\bnational\s+minimum\s+standards?\b',
+            r'\bstatutory\s+requirements?\b',
+            r'\bcompliance\s+with\s+regulations?\b',
+            r'\bprocedures?\s+(?:for|when|if)\b',
+            r'\bstaff\s+(?:responsibilities|duties|training)\b',
+            
+            # Regulatory references
+            r'\bregulation\s+\d+\b',
+            r'\bstandard\s+\d+\b',
+            r'\bcare\s+standards?\s+act\b',
+        ]
+        
+        policy_score = sum(1 for pattern in policy_indicators if re.search(pattern, content_lower))
+        
+        # Filename boost
+        if any(term in filename_lower for term in ['policy', 'procedure']):
+            policy_score += 2
+        
+        policy_confidence = min(0.9, 0.2 + (policy_score * 0.08))
+        
+        if policy_score >= 3:
+            # Detect if condensed version requested
+            condensed = (len(content) < 5000 or 
+                        any(term in filename_lower for term in ['condensed', 'summary', 'brief']))
+            
+            return {
+                "document_type": "policy_document",
+                "confidence": policy_confidence,
+                "recommended_template": "policy_analysis_condensed" if condensed else "policy_analysis",
+                "detection_score": policy_score,
+                "is_condensed": condensed
+            }
+        
+        # ENHANCED Safeguarding Case Detection
+        safeguarding_indicators = [
+            r'\bsafeguarding\s+(?:concern|case|assessment|referral)\b',
+            r'\bchild\s+protection\s+(?:concern|incident|case|plan)\b',
+            r'\bsigns\s+of\s+safety\s+(?:framework|assessment)\b',
+            r'\brisk\s+assessment\s+(?:for|following|of)\s+[A-Z][a-z]+',  # Named child
+            r'\bchild\s+in\s+need\s+assessment\b',
+            r'\bsection\s+(?:17|47)\s+(?:assessment|referral)\b',
+            r'\bchild\s+(?:at\s+risk|welfare\s+concerns?)\b',
+            r'\bdisclosure\s+of\s+(?:abuse|harm)\b',
+        ]
+        
+        safeguarding_score = sum(1 for pattern in safeguarding_indicators if re.search(pattern, content_lower))
+        
+        if safeguarding_score >= 2:
+            return {
+                "document_type": "safeguarding_case",
+                "confidence": min(0.85, 0.4 + (safeguarding_score * 0.15)),
+                "recommended_template": "safeguarding_assessment",
+                "detection_score": safeguarding_score
+            }
+        
+        # IMAGE ANALYSIS detection (for when image info is in question text)
+        if re.search(r'\bIMAGE\s+FILE:\s*.*\.(png|jpg|jpeg)', content, re.IGNORECASE):
+            return {
+                "document_type": "image_analysis",
+                "confidence": 0.9,
+                "recommended_template": "image_analysis"
+            }
+        
+        # Default fallback with low confidence
+        return {
+            "document_type": "general",
+            "confidence": 0.1,
+            "recommended_template": "standard",
+            "detection_score": 0
+        }
+
     def _process_documents(self, documents: List[Document]) -> List[Dict[str, Any]]:
         """Process retrieved documents for context building"""
         processed_docs = []
@@ -2050,6 +2825,194 @@ class HybridRAGSystem:
         
         return "\n---\n".join(context_parts)
     
+    def _process_images_parallel(self, uploaded_images: List, question: str) -> Dict[str, Any]:
+        """Process multiple images in parallel for better performance"""
+        try:
+            import concurrent.futures
+            import threading
+            
+            if not uploaded_images or len(uploaded_images) <= 1:
+                # Use regular processing for single images
+                return self._process_images(uploaded_images, question)
+            
+            logger.info(f"Processing {len(uploaded_images)} images in parallel")
+            
+            def process_single_image(img_data):
+                img, index = img_data
+                img.seek(0)
+                image_bytes = img.read()
+                
+                # Optimize image size
+                optimized_bytes = self.vision_analyzer.resize_large_images(
+                    image_bytes, img.name, max_size_mb=1.5
+                )
+                
+                result = self.vision_analyzer.analyze_image(
+                    image_bytes=optimized_bytes,
+                    question=f"{question} (Image {index+1} of {len(uploaded_images)})",
+                    context="Children's residential care facility safety assessment"
+                )
+                
+                return {
+                    "index": index,
+                    "filename": img.name,
+                    "result": result
+                }
+            
+            # Process up to 2 images simultaneously (to avoid API rate limits)
+            max_workers = min(2, len(uploaded_images))
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                image_data = [(img, i) for i, img in enumerate(uploaded_images)]
+                future_to_image = {
+                    executor.submit(process_single_image, img_data): img_data 
+                    for img_data in image_data
+                }
+                
+                results = []
+                for future in concurrent.futures.as_completed(future_to_image):
+                    try:
+                        result = future.result()
+                        results.append(result)
+                        logger.info(f"Completed analysis for image {result['index']+1}")
+                    except Exception as e:
+                        logger.error(f"Parallel processing failed for an image: {e}")
+            
+            # Sort results by original order
+            results.sort(key=lambda x: x['index'])
+            
+            # Combine results (similar to your existing code)
+            combined_analysis = []
+            all_analyses = []
+            
+            for result in results:
+                if result['result'] and result['result'].get('analysis'):
+                    all_analyses.append({
+                        "image_number": result['index'] + 1,
+                        "filename": result['filename'],
+                        "analysis": result['result']['analysis'],
+                        "model_used": result['result'].get('model_used', 'unknown'),
+                        "provider": result['result'].get('provider', 'unknown')
+                    })
+                    
+                    combined_analysis.append(
+                        f"**IMAGE {result['index']+1} ({result['filename']}):**\n{result['result']['analysis']}"
+                    )
+            
+            if combined_analysis:
+                return {
+                    "analysis": "\n\n---\n\n".join(combined_analysis),
+                    "model_used": all_analyses[0]["model_used"] if all_analyses else "unknown",
+                    "provider": all_analyses[0]["provider"] if all_analyses else "unknown",
+                    "images_processed": len(all_analyses),
+                    "total_images": len(uploaded_images),
+                    "individual_analyses": all_analyses,
+                    "processing_method": "parallel"
+                }
+            else:
+                return self.vision_analyzer._fallback_analysis(question)
+                
+        except Exception as e:
+            logger.error(f"Parallel processing failed, falling back to sequential: {e}")
+            return self._process_images(uploaded_images, question)
+
+    def _process_images(self, uploaded_images: List, question: str) -> Dict[str, Any]:
+        """Process uploaded images using vision AI - handles multiple images"""
+        try:
+            if not uploaded_images or len(uploaded_images) == 0:
+                return None
+                
+            total_size_mb = sum(img.size for img in uploaded_images if hasattr(img, 'size')) / (1024 * 1024)
+            large_images = sum(1 for img in uploaded_images if hasattr(img, 'size') and img.size > 2*1024*1024)
+            
+            # Auto-adjust performance mode based on workload
+            original_mode = self.vision_analyzer.smart_router.performance_mode
+            
+            if len(uploaded_images) > 2 or large_images >= 2 or total_size_mb > 8:
+                logger.info(f"Large workload detected: {len(uploaded_images)} images, {total_size_mb:.1f}MB total")
+                logger.info("Switching to speed mode for faster processing")
+                self.vision_analyzer.set_performance_mode("speed")
+                auto_switched = True
+            else:
+                auto_switched = False
+
+            all_analyses = []
+            combined_analysis = []
+            
+            for i, uploaded_image in enumerate(uploaded_images):
+                # Reset file pointer and read bytes
+                uploaded_image.seek(0)
+                image_bytes = uploaded_image.read()
+                
+                # Debug logging
+                logger.info(f"Processing image {i+1}/{len(uploaded_images)}: {uploaded_image.name}, size: {len(image_bytes)} bytes")
+                
+                # Analyze each image individually
+                vision_result = self.vision_analyzer.analyze_image(
+                    image_bytes=image_bytes,
+                    question=f"{question} (Image {i+1} of {len(uploaded_images)})",
+                    context="Children's residential care facility safety assessment"
+                )
+                
+                if vision_result and vision_result.get("analysis"):
+                    all_analyses.append({
+                        "image_number": i+1,
+                        "filename": uploaded_image.name,
+                        "analysis": vision_result["analysis"],
+                        "model_used": vision_result.get("model_used", "unknown"),
+                        "provider": vision_result.get("provider", "unknown")
+                    })
+                    
+                    # Add to combined analysis with image identifier
+                    combined_analysis.append(f"**IMAGE {i+1} ({uploaded_image.name}):**\n{vision_result['analysis']}")
+                    
+                    logger.info(f"Successfully analyzed image {i+1} using {vision_result.get('provider', 'unknown')}")
+                else:
+                    logger.warning(f"Failed to analyze image {i+1}: {uploaded_image.name}")
+            
+            if combined_analysis:
+                # Return combined result
+                return {
+                    "analysis": "\n\n---\n\n".join(combined_analysis),
+                    "model_used": all_analyses[0]["model_used"] if all_analyses else "unknown",
+                    "provider": all_analyses[0]["provider"] if all_analyses else "unknown",
+                    "images_processed": len(all_analyses),
+                    "total_images": len(uploaded_images),
+                    "individual_analyses": all_analyses
+                }
+            else:
+                logger.error("No images could be analyzed successfully")
+                return self.vision_analyzer._fallback_analysis(question)
+                
+        except Exception as e:
+            logger.error(f"Multi-image processing failed: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return {
+                "analysis": f"Multi-image processing failed: {str(e)}",
+                "model_used": "error",
+                "provider": "error"
+            }
+    
+    def _build_vision_enhanced_prompt(self, question: str, context_text: str, 
+                                    detected_mode: ResponseMode, vision_analysis: Dict = None) -> str:
+        """Build prompt enhanced with vision analysis results"""
+        
+        # Get base template
+        template = self.prompt_manager.get_template(detected_mode, question)
+        
+        # Enhance context with vision analysis
+        if vision_analysis and vision_analysis.get("analysis"):
+            enhanced_context = f"""VISUAL ANALYSIS RESULTS:
+{vision_analysis['analysis']}
+
+DOCUMENT CONTEXT:
+{context_text}"""
+        else:
+            enhanced_context = context_text
+        
+        return template.format(context=enhanced_context, question=question)
+
     def _build_optimized_prompt(self, question: str, context_text: str, 
                                detected_mode: ResponseMode) -> str:
         """Build prompt optimized for the detected response mode"""
@@ -2146,10 +3109,10 @@ class HybridRAGSystem:
     
     def _create_streamlit_response(self, question: str, answer: str, documents: List[Dict[str, Any]],
                                   routing_info: Dict[str, Any], model_info: Dict[str, Any], 
-                                  detected_mode: str, start_time: float) -> Dict[str, Any]:
-        """Create response in exact format expected by Streamlit app"""
+                                  detected_mode: str, vision_analysis: Dict = None, start_time: float = None) -> Dict[str, Any]:
+        """Enhanced response creation with vision metadata"""
         
-        total_time = time.time() - start_time
+        total_time = time.time() - start_time if start_time else 0
         
         # Create sources in expected format
         sources = []
@@ -2165,22 +3128,35 @@ class HybridRAGSystem:
         # Calculate confidence score
         confidence_score = self._calculate_confidence_score(routing_info, documents, model_info)
         
-        # Build response in Streamlit-expected format
+        # Enhanced metadata with vision info
+        metadata = {
+            "llm_used": model_info.get("model_used", "unknown"),
+            "provider": model_info.get("provider", "unknown"),
+            "response_mode": detected_mode,
+            "embedding_provider": routing_info.get("provider", "unknown"),
+            "total_response_time": total_time,
+            "retrieval_time": routing_info.get("response_time", 0),
+            "generation_time": total_time - routing_info.get("response_time", 0),
+            "expected_time": model_info.get("expected_time", "unknown"),
+            "context_chunks": len(documents),
+            "used_fallback": routing_info.get("used_fallback", False)
+        }
+        
+        # Add vision analysis metadata
+        if vision_analysis:
+            metadata.update({
+                "vision_model": vision_analysis.get("model_used", "none"),
+                "vision_provider": vision_analysis.get("provider", "none"),
+                "vision_analysis_performed": True
+            })
+        else:
+            metadata["vision_analysis_performed"] = False
+        
+        # Build response
         response = {
             "answer": answer,
             "sources": sources,
-            "metadata": {
-                "llm_used": model_info.get("model_used", "unknown"),
-                "provider": model_info.get("provider", "unknown"),
-                "response_mode": detected_mode,
-                "embedding_provider": routing_info.get("provider", "unknown"),
-                "total_response_time": total_time,
-                "retrieval_time": routing_info.get("response_time", 0),
-                "generation_time": total_time - routing_info.get("response_time", 0),
-                "expected_time": model_info.get("expected_time", "unknown"),
-                "context_chunks": len(documents),
-                "used_fallback": routing_info.get("used_fallback", False)
-            },
+            "metadata": metadata,
             "confidence_score": confidence_score,
             "performance": {
                 "total_response_time": total_time,

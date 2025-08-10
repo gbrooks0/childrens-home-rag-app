@@ -72,6 +72,50 @@ ROUTING_CONFIG = {
     "max_response_time_seconds": 10.0
 }
 
+# =============================================================================
+# VISION MODEL CONFIGURATION (ADD THIS SECTION)
+# =============================================================================
+
+VISION_CONFIG = {
+    "models": {
+        "openai_vision": {
+            "model": "gpt-4o",
+            "speed_tier": "slow",
+            "quality_tier": "high"
+        },
+        "openai_vision_mini": {
+            "model": "gpt-4o-mini", 
+            "speed_tier": "fast",
+            "quality_tier": "medium"
+        },
+        "google_vision": {
+            "model": "gemini-1.5-pro",
+            "speed_tier": "slow", 
+            "quality_tier": "high"
+        },
+        "google_vision_flash": {
+            "model": "gemini-1.5-flash",
+            "speed_tier": "fast",
+            "quality_tier": "medium"
+        }
+    },
+    "routing_rules": {
+        "speed": ["openai_vision_mini", "google_vision_flash"],
+        "balanced": ["google_vision_flash", "openai_vision_mini", "google_vision"],
+        "quality": ["openai_vision", "google_vision"]
+    },
+    "default_strategy": "balanced"
+}
+
+LLM_CONFIG = {
+    "models": {
+        "gpt_4o": {"speed_tier": "slow", "quality_tier": "high"},
+        "gpt_4o_mini": {"speed_tier": "fast", "quality_tier": "medium"},
+        "gemini_1_5_pro": {"speed_tier": "medium", "quality_tier": "high"},
+        "gemini_1_5_flash": {"speed_tier": "fast", "quality_tier": "medium"}
+    }
+}
+
 # Performance tracking
 PERFORMANCE_METRICS = {
     "response_time_weight": 0.3,
@@ -241,6 +285,102 @@ class PerformanceTracker:
         except Exception as e:
             logger.error(f"Failed to save performance metrics: {e}")
 
+
+# =============================================================================
+# ENHANCED PERFORMANCE TRACKER (ADD THIS CLASS)
+# =============================================================================
+
+class VisionPerformanceTracker(PerformanceTracker):
+    """Extended performance tracker for vision and LLM models."""
+    
+    def __init__(self):
+        super().__init__()
+        self.vision_metrics = {
+            "vision_models": {},
+            "llm_models": {},
+            "speed_vs_quality": {}
+        }
+    
+    def record_vision_query(self, vision_model: str, llm_model: str, 
+                           image_size_kb: int, query_complexity: str,
+                           vision_time: float, llm_time: float, total_time: float):
+        """Record performance metrics for vision + LLM pipeline."""
+        
+        # Simple performance tracking
+        if vision_model not in self.vision_metrics["vision_models"]:
+            self.vision_metrics["vision_models"][vision_model] = {
+                "total_queries": 0, "total_time": 0
+            }
+        
+        vision_stats = self.vision_metrics["vision_models"][vision_model]
+        vision_stats["total_queries"] += 1
+        vision_stats["total_time"] += vision_time
+        
+        # Similar for LLM tracking
+        if llm_model not in self.vision_metrics["llm_models"]:
+            self.vision_metrics["llm_models"][llm_model] = {
+                "total_queries": 0, "total_time": 0
+            }
+        
+        llm_stats = self.vision_metrics["llm_models"][llm_model]
+        llm_stats["total_queries"] += 1
+        llm_stats["total_time"] += llm_time
+    
+    def get_best_vision_model(self, priority: str = "balanced") -> str:
+        """Get best vision model based on priority."""
+        if priority not in VISION_CONFIG["routing_rules"]:
+            priority = VISION_CONFIG["default_strategy"]
+        
+        priority_models = VISION_CONFIG["routing_rules"][priority]
+        
+        # Check performance metrics if available
+        if self.vision_metrics["vision_models"]:
+            best_model = None
+            best_avg_time = float('inf')
+            
+            for model in priority_models:
+                if model in self.vision_metrics["vision_models"]:
+                    stats = self.vision_metrics["vision_models"][model]
+                    if stats["total_queries"] > 0:
+                        avg_time = stats["total_time"] / stats["total_queries"]
+                        if avg_time < best_avg_time:
+                            best_avg_time = avg_time
+                            best_model = model
+            
+            if best_model:
+                return best_model
+        
+        # Fallback to first available model in priority list
+        return priority_models[0] if priority_models else "openai_vision_mini"
+    
+    def get_best_llm_model(self, complexity: str = "medium") -> str:
+        """Get best LLM model based on complexity."""
+        if complexity == "low":
+            candidates = ["gpt_4o_mini", "gemini_1_5_flash"]
+        elif complexity == "high":
+            candidates = ["gpt_4o", "gemini_1_5_pro"] 
+        else:  # medium
+            candidates = ["gpt_4o_mini", "gemini_1_5_flash", "gemini_1_5_pro"]
+        
+        # Check performance metrics
+        if self.vision_metrics["llm_models"]:
+            best_model = None
+            best_time = float('inf')
+            
+            for model in candidates:
+                if model in self.vision_metrics["llm_models"]:
+                    stats = self.vision_metrics["llm_models"][model]
+                    if stats["total_queries"] > 0:
+                        avg_time = stats["total_time"] / stats["total_queries"]
+                        if avg_time < best_time:
+                            best_time = avg_time
+                            best_model = model
+            
+            if best_model:
+                return best_model
+        
+        return candidates[0] if candidates else "gpt_4o_mini"
+
 # =============================================================================
 # QUERY ANALYZER
 # =============================================================================
@@ -320,13 +460,93 @@ class QueryAnalyzer:
 class SmartRouter:
     """Main router class that combines query analysis and performance metrics."""
     
+    # ADD THESE METHODS TO YOUR EXISTING SmartRouter CLASS
+
     def __init__(self):
+        # Keep your existing __init__ code exactly the same
         self.performance_tracker = PerformanceTracker()
         self.query_analyzer = QueryAnalyzer()
         self.embedding_models = {}
         self.vector_stores = {}
         self.load_embedding_models()
         self.load_vector_stores()
+    
+        # ADD THESE LINES:
+        self.vision_tracker = VisionPerformanceTracker()
+        self.performance_mode = "balanced"
+
+    def set_performance_mode(self, mode: str):
+        """Set performance mode: 'speed', 'balanced', or 'quality'."""
+        if mode in ["speed", "balanced", "quality"]:
+            self.performance_mode = mode
+            logger.info(f"Performance mode set to: {mode}")
+        else:
+            logger.warning(f"Invalid mode {mode}. Valid modes: speed, balanced, quality")
+
+    def analyze_query_complexity(self, query: str, has_image: bool = False) -> str:
+        """Analyze query complexity for model selection."""
+        query_lower = query.lower()
+    
+        high_complexity_keywords = [
+            "analyze", "compare", "evaluate", "assess", "detailed", "comprehensive",
+            "complex", "multi-step", "reasoning", "critical", "safety", "risk"
+        ]
+    
+        low_complexity_keywords = [
+            "what", "who", "when", "where", "simple", "basic", "quick", "summary"
+        ]
+    
+        high_score = sum(1 for keyword in high_complexity_keywords if keyword in query_lower)
+        low_score = sum(1 for keyword in low_complexity_keywords if keyword in query_lower)
+    
+        query_length = len(query.split())
+    
+        if has_image:
+            complexity_boost = 1  # Images add complexity
+        else:
+            complexity_boost = 0
+        
+        if high_score >= 2 or query_length > 30 or complexity_boost:
+            return "high"
+        elif low_score >= 2 and query_length < 10:
+            return "low" 
+        else:
+            return "medium"
+
+    def route_multimodal_query(self, query: str, image_data: bytes = None, 
+                              image_size_kb: int = None, k: int = 5) -> Dict[str, Any]:
+        """
+        Route multimodal query with optimal model selection.
+        """
+        start_time = time.time()
+    
+        # Analyze query complexity
+        complexity = self.analyze_query_complexity(query, has_image=bool(image_data))
+    
+        # Route text retrieval (existing functionality)
+        text_result = self.route_query(query, k=k)
+    
+        # Select vision model if image provided
+        vision_model = None
+        if image_data:
+            vision_model = self.vision_tracker.get_best_vision_model(
+                priority=self.performance_mode
+            )
+    
+        # Select LLM model based on complexity and mode
+        llm_model = self.vision_tracker.get_best_llm_model(complexity=complexity)
+    
+        # Build response
+        routing_result = {
+            "text_routing": text_result,
+            "vision_model": vision_model,
+            "llm_model": llm_model,
+            "performance_mode": self.performance_mode,
+            "query_complexity": complexity,
+            "timestamp": datetime.now().isoformat()
+        }
+    
+        return routing_result
     
     def load_embedding_models(self):
         """Load embedding models based on available configurations."""

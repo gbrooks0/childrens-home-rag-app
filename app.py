@@ -731,61 +731,83 @@ def show_quick_actions():
                 process_unified_request(question)
 
 def process_unified_request(user_question, uploaded_files=None):
-    """Process unified request using the existing RAG system"""
+    """Process unified request with BOTH document and image analysis support"""
     ensure_ui_state()
     timing_start = time.time()
     
     performance_mode = st.session_state.get('performance_mode', 'balanced')
     
-    # Prepare context for file uploads
-    file_context = ""
-    if uploaded_files:
-        file_context = process_uploaded_files(uploaded_files)
-        
-        # If no question provided, create default analysis question
-        if not user_question.strip():
-            file_types = [f.type for f in uploaded_files]
-            if any("image" in ft for ft in file_types):
-                user_question = "Analyze these images for safety, compliance, and quality standards in our children's home facility."
-            else:
-                user_question = "Analyze these documents for key findings, compliance issues, and recommendations."
+    # Separate files by type
+    image_files = []
+    document_files = []
     
-    # Combine question with file context
-    if file_context:
-        full_question = f"{user_question}\n\nUploaded Content:\n{file_context}"
+    if uploaded_files:
+        for file in uploaded_files:
+            file_extension = file.name.split('.')[-1].lower()
+            if file_extension in ['png', 'jpg', 'jpeg']:
+                image_files.append(file)
+            elif file_extension in ['pdf', 'docx', 'txt', 'md']:
+                document_files.append(file)
+    
+    # Process documents for context (existing logic)
+    document_context = ""
+    if document_files:
+        document_context = process_uploaded_documents(document_files)
+    
+    # Build the question with document context
+    if document_context:
+        full_question = f"{user_question}\n\nDocument Content:\n{document_context}"
         is_file_analysis = True
     else:
         full_question = user_question
-        is_file_analysis = False
+        is_file_analysis = bool(image_files)  # True if images uploaded
+    
+    # Create default question if none provided but files uploaded
+    if not user_question.strip() and (image_files or document_files):
+        if image_files and document_files:
+            user_question = "Analyze these documents and images for compliance, safety, and facility management."
+            full_question = f"{user_question}\n\nDocument Content:\n{document_context}"
+        elif image_files:
+            user_question = "Analyze these images for safety, compliance, and facility management."
+            full_question = user_question
+        elif document_files:
+            user_question = "Analyze these documents for key findings, compliance, and recommendations."
+            full_question = f"{user_question}\n\nDocument Content:\n{document_context}"
     
     log_tester_activity(
         st.session_state.get('tester_id', 'unknown'),
         "unified_request_submitted",
-        f"Mode: {performance_mode}, Files: {len(uploaded_files) if uploaded_files else 0}, Question: {user_question[:50]}..."
+        f"Mode: {performance_mode}, Docs: {len(document_files)}, Images: {len(image_files)}, Question: {user_question[:50]}..."
     )
     
     progress_placeholder = st.empty()
     
     try:
         with progress_placeholder:
-            if uploaded_files:
-                st.info(f"🔍 Analyzing {len(uploaded_files)} file(s) and processing your question...")
+            if image_files and document_files:
+                st.info(f"🔍 Analyzing {len(document_files)} document(s) and {len(image_files)} image(s)...")
+            elif image_files:
+                st.info(f"📷 Analyzing {len(image_files)} image(s) with AI vision...")
+            elif document_files:
+                st.info(f"📄 Analyzing {len(document_files)} document(s)...")
             else:
                 st.info("🔍 Processing your question...")
         
-        # Use existing RAG system query method
+        # Call enhanced RAG system with both document context and images
         result = st.session_state.rag_system.query(
             question=full_question,
             k=5,
-            response_style="comprehensive",
-            performance_mode=performance_mode,
-            is_file_analysis=is_file_analysis
+            response_style="standard",
+            performance_mode="balanced",
+            is_file_analysis=is_file_analysis,
+            uploaded_files=uploaded_files, 
+            uploaded_images=uploaded_images if 'uploaded_images' in locals() else None # Vision AI handles images
+            # Document context is already in full_question, so RAG can find related docs
         )
         
         progress_placeholder.empty()
         
         if result and result.get("answer"):
-            # Store result in UI state
             st.session_state.ui_state.update({
                 'current_result': result,
                 'last_asked_question': user_question,
@@ -793,14 +815,29 @@ def process_unified_request(user_question, uploaded_files=None):
                 'show_analytics': False
             })
             
+            # Enhanced success message
+            success_parts = []
+            if document_files:
+                success_parts.append(f"{len(document_files)} document(s)")
+            if image_files:
+                vision_model = result.get("metadata", {}).get("vision_model", "AI vision")
+                success_parts.append(f"{len(image_files)} image(s) with {vision_model}")
+            
+            if success_parts:
+                st.success(f"✅ Analysis complete! Processed {' and '.join(success_parts)}")
+            else:
+                st.success("✅ Analysis complete!")
+
+            st.rerun()
+            
+            # Display results
+            show_clean_result_display()
+            
             log_tester_activity(
                 st.session_state.get('tester_id', 'unknown'),
                 "successful_response",
-                f"Mode: {performance_mode}, Time: {time.time() - timing_start:.1f}s"
+                f"Mode: {performance_mode}, Docs: {len(document_files)}, Images: {len(image_files)}, Vision: {result.get('metadata', {}).get('vision_analysis_performed', False)}, Time: {time.time() - timing_start:.1f}s"
             )
-            
-            # Force page refresh to show clean results layout
-            st.rerun()
             
         else:
             st.error("❌ Sorry, I couldn't generate a response.")
@@ -813,21 +850,64 @@ def process_unified_request(user_question, uploaded_files=None):
         log_tester_activity(
             st.session_state.get('tester_id', 'unknown'),
             "system_error",
-            f"Mode: {performance_mode}, Error: {str(e)[:100]}"
+            f"Mode: {performance_mode}, Docs: {len(document_files)}, Images: {len(image_files)}, Error: {str(e)[:100]}"
         )
 
-def process_uploaded_files(uploaded_files):
-    """Process uploaded files and return content for analysis"""
+
+def process_uploaded_documents(uploaded_files):
+    """Process uploaded DOCUMENTS (PDF, DOCX, TXT, MD) for text analysis"""
     file_contents = []
     
     for file in uploaded_files:
         try:
             file_extension = file.name.split('.')[-1].lower()
             
-            if file_extension in ['png', 'jpg', 'jpeg']:
-                # For images, just note them - the RAG system will handle image analysis
-                file_contents.append(f"IMAGE FILE: {file.name} (Visual analysis requested)")
+            if file_extension == 'pdf':
+                if PDF_SUPPORT:
+                    import PyPDF2
+                    file.seek(0)  # Reset file pointer
+                    pdf_reader = PyPDF2.PdfReader(file)
+                    content = ""
+                    for page in pdf_reader.pages:
+                        content += page.extract_text() + "\n"
+                    file_contents.append(f"DOCUMENT: {file.name}\n{content}")
+                else:
+                    file_contents.append(f"DOCUMENT: {file.name} (PDF processing not available)")
             
+            elif file_extension == 'docx':
+                if DOCX_SUPPORT:
+                    import docx
+                    file.seek(0)  # Reset file pointer
+                    doc = docx.Document(file)
+                    content = ""
+                    for paragraph in doc.paragraphs:
+                        content += paragraph.text + "\n"
+                    file_contents.append(f"DOCUMENT: {file.name}\n{content}")
+                else:
+                    file_contents.append(f"DOCUMENT: {file.name} (Word processing not available)")
+            
+            elif file_extension in ['txt', 'md']:
+                file.seek(0)  # Reset file pointer
+                content = file.read().decode('utf-8')
+                file_contents.append(f"DOCUMENT: {file.name}\n{content}")
+                
+        except Exception as e:
+            file_contents.append(f"ERROR processing {file.name}: {str(e)}")
+    
+    return "\n\n---\n\n".join(file_contents)
+
+def process_uploaded_files(uploaded_files):
+    """Process uploaded DOCUMENTS only - images handled by vision AI"""
+    file_contents = []
+    
+    for file in uploaded_files:
+        try:
+            file_extension = file.name.split('.')[-1].lower()
+            
+            # Skip images - they're handled by vision AI now
+            if file_extension in ['png', 'jpg', 'jpeg']:
+                continue
+                
             elif file_extension == 'pdf':
                 if PDF_SUPPORT:
                     import PyPDF2
@@ -858,6 +938,37 @@ def process_uploaded_files(uploaded_files):
             file_contents.append(f"ERROR processing {file.name}: {str(e)}")
     
     return "\n\n---\n\n".join(file_contents)
+
+def determine_image_context(filename):
+    """Determine the likely context of an uploaded image for better analysis"""
+    filename_lower = filename.lower()
+    
+    # Kitchen/dining related
+    if any(keyword in filename_lower for keyword in ['kitchen', 'dining', 'food', 'cook']):
+        return "Kitchen/dining area - analyzing for food safety and hygiene compliance"
+    
+    # Bedroom/living areas
+    elif any(keyword in filename_lower for keyword in ['bedroom', 'living', 'lounge', 'room']):
+        return "Living space - analyzing for safety, homeliness, and child-friendly environment"
+    
+    # Bathroom areas
+    elif any(keyword in filename_lower for keyword in ['bathroom', 'toilet', 'shower']):
+        return "Bathroom facility - analyzing for privacy, safety, and hygiene standards"
+    
+    # Outdoor areas
+    elif any(keyword in filename_lower for keyword in ['garden', 'outdoor', 'playground', 'yard']):
+        return "Outdoor space - analyzing for safety, security, and recreational value"
+    
+    # Office/admin areas
+    elif any(keyword in filename_lower for keyword in ['office', 'admin', 'staff']):
+        return "Administrative area - analyzing for professional standards and security"
+    
+    # General facility
+    elif any(keyword in filename_lower for keyword in ['facility', 'home', 'building', 'entrance']):
+        return "General facility - analyzing for overall safety, compliance, and environment quality"
+    
+    else:
+        return "Facility image - analyzing for safety, compliance, and quality standards"
 
 # ===== RESULT DISPLAY FUNCTIONS =====
 def show_clean_result_display():
