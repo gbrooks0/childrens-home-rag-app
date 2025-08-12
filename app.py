@@ -567,6 +567,11 @@ def clear_ui_state():
         'show_analytics': False,
         'question_counter': st.session_state.ui_state.get('question_counter', 0) + 1
     })
+    
+    # CLEAR PDF CACHE for new questions
+    if 'cached_file_content' in st.session_state:
+        del st.session_state.cached_file_content
+        print("🧹 CACHE CLEARED: Ready for new question")
 
 # ===== SOURCE PROCESSING FUNCTIONS =====
 def extract_source_info(source):
@@ -737,7 +742,7 @@ def process_unified_request(user_question, uploaded_files=None):
     
     performance_mode = st.session_state.get('performance_mode', 'balanced')
     
-    # Separate files by type
+    # Separate files by type - THIS MUST COME FIRST
     image_files = []
     document_files = []
     
@@ -749,7 +754,89 @@ def process_unified_request(user_question, uploaded_files=None):
             elif file_extension in ['pdf', 'docx', 'txt', 'md']:
                 document_files.append(file)
     
-    # Process documents for context (existing logic)
+    # NOW process Ofsted detection with caching
+    if document_files and hasattr(st.session_state.rag_system, 'ofsted_detector'):
+        try:
+            file_analysis = st.session_state.rag_system.ofsted_detector.detect_ofsted_upload(document_files)
+
+            # Store for RAG system to reuse
+            st.session_state.rag_system._last_ofsted_analysis = file_analysis  # ADD THIS LINE
+            
+            # CACHE EXTRACTED CONTENT to avoid re-processing
+            if 'cached_file_content' not in st.session_state:
+                st.session_state.cached_file_content = {}
+            
+            # Store extracted content for each file
+            for report_data in file_analysis.get('ofsted_reports', []):
+                filename = report_data['file'].name
+                content = report_data['content']
+                st.session_state.cached_file_content[filename] = content
+                print(f"🗂️  CACHED: {filename} ({len(content)} characters)")
+            
+            if file_analysis['has_ofsted']:
+                st.info(f"🔍 Detected {len(file_analysis['ofsted_reports'])} Ofsted report(s)")
+                
+                # Display detected reports
+                for report_data in file_analysis['ofsted_reports']:
+                    summary = report_data['summary']
+                    with st.expander(f"📋 {summary.provider_name} - {summary.overall_rating}"):
+                        st.write(f"**Inspection Date:** {summary.inspection_date}")
+                        st.write(f"**Current Rating:** {summary.overall_rating}")
+                        if summary.key_strengths:
+                            st.write(f"**Key Strengths:** {'; '.join(summary.key_strengths[:2])}")
+                        if summary.areas_for_improvement:
+                            st.write(f"**Areas for Improvement:** {'; '.join(summary.areas_for_improvement[:2])}")
+                
+                # Check for improvement journey - WITH BALLOONS!
+                if file_analysis['multiple_ofsted']:
+                    providers = [r['summary'].provider_name for r in file_analysis['ofsted_reports']]
+                    unique_providers = list(set([p.lower().strip() for p in providers]))
+                    
+                    if len(unique_providers) == 1:
+                        st.success("📈 Same provider detected - improvement analysis available!")
+                        
+                        ratings = [r['summary'].overall_rating for r in file_analysis['ofsted_reports']]
+                        rating_order = ['Inadequate', 'Requires improvement', 'Good', 'Outstanding']
+                        
+                        if len(set(ratings)) > 1:
+                            try:
+                                sorted_reports = sorted(file_analysis['ofsted_reports'], 
+                                                      key=lambda x: x['summary'].inspection_date)
+                                if len(sorted_reports) >= 2:
+                                    earlier_rating = sorted_reports[0]['summary'].overall_rating
+                                    later_rating = sorted_reports[-1]['summary'].overall_rating
+                                    
+                                    earlier_index = rating_order.index(earlier_rating) if earlier_rating in rating_order else -1
+                                    later_index = rating_order.index(later_rating) if later_rating in rating_order else -1
+                                    
+                                    if earlier_index != -1 and later_index != -1 and later_index > earlier_index:
+                                        st.balloons()  # BALLOONS ARE BACK!
+                                        st.success(f"🎉 Improvement detected: {earlier_rating} → {later_rating}")
+                            except (ValueError, KeyError, IndexError):
+                                pass
+                    else:
+                        st.info("🔄 Multiple providers detected - comparison analysis available!")
+                
+                # Auto-enhance question logic
+                if not user_question.strip():
+                    if file_analysis['multiple_ofsted']:
+                        providers = [r['summary'].provider_name for r in file_analysis['ofsted_reports']]
+                        if len(set([p.lower().strip() for p in providers])) == 1:
+                            user_question = "Compare these Ofsted reports and show the improvement journey with next steps to Outstanding"
+                        else:
+                            user_question = "Compare these Ofsted reports and identify transferable best practices"
+                    else:
+                        summary = file_analysis['ofsted_reports'][0]['summary']
+                        user_question = f"Analyze this Ofsted report for {summary.provider_name} and provide improvement pathway to Outstanding"
+        
+        except Exception as e:
+            print(f"ERROR: Ofsted detection failed: {e}")
+            st.session_state.rag_system._last_ofsted_analysis = None  # ADD THIS LINE
+            # Clear cache on error
+            if 'cached_file_content' in st.session_state:
+                del st.session_state.cached_file_content
+
+    # Process documents for context (with caching)
     document_context = ""
     if document_files:
         document_context = process_uploaded_documents(document_files)
@@ -800,9 +887,8 @@ def process_unified_request(user_question, uploaded_files=None):
             response_style="standard",
             performance_mode="balanced",
             is_file_analysis=is_file_analysis,
-            uploaded_files=uploaded_files, 
-            uploaded_images=uploaded_images if 'uploaded_images' in locals() else None # Vision AI handles images
-            # Document context is already in full_question, so RAG can find related docs
+            uploaded_files=None, 
+            uploaded_images=image_files if image_files else None  # FIXED: Pass image_files
         )
         
         progress_placeholder.empty()
@@ -827,6 +913,19 @@ def process_unified_request(user_question, uploaded_files=None):
                 st.success(f"✅ Analysis complete! Processed {' and '.join(success_parts)}")
             else:
                 st.success("✅ Analysis complete!")
+
+            if hasattr(st.session_state.rag_system, '_last_ofsted_analysis') and st.session_state.rag_system._last_ofsted_analysis:
+                ofsted_analysis = st.session_state.rag_system._last_ofsted_analysis
+                if ofsted_analysis['has_ofsted']:
+                    if ofsted_analysis['multiple_ofsted']:
+                        providers = [r['summary'].provider_name for r in ofsted_analysis['ofsted_reports']]
+                        if len(set([p.lower().strip() for p in providers])) == 1:
+                            st.info("🎯 Improvement journey analysis completed with Outstanding pathway!")
+                        else:
+                            st.info("🔄 Comparative Ofsted analysis completed with best practice recommendations!")
+                    else:
+                        summary = ofsted_analysis['ofsted_reports'][0]['summary']
+                        st.info(f"📋 Ofsted analysis completed for {summary.provider_name} ({summary.overall_rating})")
 
             st.rerun()
             
@@ -853,15 +952,25 @@ def process_unified_request(user_question, uploaded_files=None):
             f"Mode: {performance_mode}, Docs: {len(document_files)}, Images: {len(image_files)}, Error: {str(e)[:100]}"
         )
 
-
 def process_uploaded_documents(uploaded_files):
-    """Process uploaded DOCUMENTS (PDF, DOCX, TXT, MD) for text analysis"""
+    """Process uploaded DOCUMENTS (PDF, DOCX, TXT, MD) - OPTIMIZED to use cached content"""
     file_contents = []
     
     for file in uploaded_files:
         try:
             file_extension = file.name.split('.')[-1].lower()
             
+            # CHECK CACHE FIRST - avoid re-processing PDFs
+            if (file_extension == 'pdf' and 
+                hasattr(st.session_state, 'cached_file_content') and 
+                file.name in st.session_state.cached_file_content):
+                
+                cached_content = st.session_state.cached_file_content[file.name]
+                file_contents.append(f"DOCUMENT: {file.name}\n{cached_content}")
+                print(f"✅ CACHE HIT: Using cached PDF content for {file.name} ({len(cached_content)} characters)")
+                continue
+            
+            # EXTRACT CONTENT (only if not cached)
             if file_extension == 'pdf':
                 if PDF_SUPPORT:
                     import PyPDF2
@@ -871,6 +980,7 @@ def process_uploaded_documents(uploaded_files):
                     for page in pdf_reader.pages:
                         content += page.extract_text() + "\n"
                     file_contents.append(f"DOCUMENT: {file.name}\n{content}")
+                    print(f"📄 CACHE MISS: Extracted PDF content for {file.name} ({len(content)} characters)")
                 else:
                     file_contents.append(f"DOCUMENT: {file.name} (PDF processing not available)")
             
@@ -895,6 +1005,7 @@ def process_uploaded_documents(uploaded_files):
             file_contents.append(f"ERROR processing {file.name}: {str(e)}")
     
     return "\n\n---\n\n".join(file_contents)
+
 
 def process_uploaded_files(uploaded_files):
     """Process uploaded DOCUMENTS only - images handled by vision AI"""
@@ -1190,50 +1301,77 @@ def detect_report_type(question, result):
     return "general_analysis"
 
 def extract_provider_name(answer_text):
-    """Extract provider name from Ofsted analysis"""
+    """Enhanced provider name extraction with priority for actual company names"""
     import re
     
-    # Look for provider name patterns
-    patterns = [
-        r'\*\*Provider Name:\*\*\s*([^\n]+)',
-        r'Provider Name:\s*([^\n]+)',
-        r'\*\*([^*]+(?:Ltd|Limited|Care|Homes|Services))\*\*',
+    # PRIORITY 1: Look for actual company names first (highest priority)
+    company_patterns = [
+        r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Ltd|Limited|Care|Homes|Services))',
+        r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+){2,4}(?:\s+(?:Ltd|Limited))?)',
     ]
     
-    for pattern in patterns:
+    for pattern in company_patterns:
+        matches = re.findall(pattern, answer_text, re.IGNORECASE)
+        for match in matches:
+            provider = match.strip()
+            
+            # Filter out generic terms and validate it's a real company name
+            if (len(provider) > 10 and 
+                not any(generic in provider.lower() for generic in ['children', 'home', 'report', 'inspection', 'analysis']) and
+                provider.lower() not in ['ofsted inspection', 'inspection report']):
+                
+                # Clean for filename
+                clean_provider = re.sub(r'[^\w\s-]', '', provider)
+                clean_provider = re.sub(r'\s+', '_', clean_provider)
+                return clean_provider[:40]
+    
+    # PRIORITY 2: Standard format patterns
+    standard_patterns = [
+        r'\*\*Provider Name:\*\*\s*([^\n]+)',
+        r'Provider Name:\s*([^\n]+)',
+        r'Provider:\s*([^\n]+)',
+    ]
+    
+    for pattern in standard_patterns:
         match = re.search(pattern, answer_text, re.IGNORECASE)
         if match:
             provider = match.group(1).strip()
-            # Clean the provider name for filename
-            provider = re.sub(r'[^\w\s-]', '', provider)
-            provider = re.sub(r'\s+', '_', provider)
-            provider = provider[:30]  # Limit length
-            return provider
+            if len(provider) > 5:
+                clean_provider = re.sub(r'[^\w\s-]', '', provider)
+                clean_provider = re.sub(r'\s+', '_', clean_provider)
+                return clean_provider[:40]
     
-    return None
-
-def extract_policy_type(question):
-    """Extract policy type from question"""
-    import re
+    # PRIORITY 3: Narrative patterns (but avoid generic references)
+    narrative_patterns = [
+        r'children\'s home operated by ([^,\n.]+)',
+        r'inspection reports for ([^,\n.]+) present',
+        r'The home operated by ([^,\n.]+)',
+    ]
     
-    # Common policy types
-    policy_types = {
-        'safeguarding': 'Safeguarding',
-        'medication': 'Medication',
-        'behaviour': 'Behaviour_Management',
-        'education': 'Education',
-        'health': 'Health_Safety',
-        'admission': 'Admissions',
-        'contact': 'Contact_Visits',
-        'complaints': 'Complaints',
-        'missing': 'Missing_Children',
-        'restraint': 'Physical_Intervention'
-    }
+    for pattern in narrative_patterns:
+        matches = re.findall(pattern, answer_text, re.IGNORECASE)
+        for match in matches:
+            provider = match.strip()
+            
+            # Only use if it's not a generic reference
+            if (len(provider) > 8 and 
+                not re.match(r'children\'?s\s+home\s+\d+', provider.lower()) and
+                not provider.lower().startswith('children')):
+                
+                clean_provider = re.sub(r'[^\w\s-]', '', provider)
+                clean_provider = re.sub(r'\s+', '_', clean_provider)
+                return clean_provider[:40]
     
-    question_lower = question.lower()
-    for keyword, policy_type in policy_types.items():
-        if keyword in question_lower:
-            return policy_type
+    # LAST RESORT: Use fallback but avoid "Children's Home" patterns
+    fallback_pattern = r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})'
+    matches = re.findall(fallback_pattern, answer_text)
+    
+    for match in matches:
+        if (len(match.strip()) > 8 and 
+            not any(generic in match.lower() for generic in ['children', 'home', 'ofsted', 'inspection'])):
+            clean_match = re.sub(r'[^\w\s-]', '', match)
+            clean_match = re.sub(r'\s+', '_', clean_match)
+            return clean_match[:40]
     
     return None
 
@@ -1364,13 +1502,25 @@ def generate_simple_report(result, question):
         report_type = detect_report_type(question, result)
         
         if report_type == "ofsted_analysis":
-            # Try to extract provider name
-            answer = result.get("answer", "")
-            provider_match = re.search(r'\*\*Provider Name:\*\*\s*([^\n]+)', answer)
-            if provider_match:
-                provider = provider_match.group(1).strip()
-                provider = re.sub(r'[^\w\s-]', '', provider)
-                provider = re.sub(r'\s+', '_', provider)[:25]
+            provider = None
+            
+            # PRIORITY: Get from stored Ofsted analysis (most reliable)
+            try:
+                if hasattr(st.session_state, 'rag_system') and hasattr(st.session_state.rag_system, '_last_ofsted_analysis'):
+                    ofsted_analysis = st.session_state.rag_system._last_ofsted_analysis
+                    if ofsted_analysis and ofsted_analysis.get('ofsted_reports'):
+                        provider_name = ofsted_analysis['ofsted_reports'][0]['summary'].provider_name
+                        if provider_name and provider_name != "Unknown Provider":
+                            provider = re.sub(r'[^\w\s-]', '', provider_name)
+                            provider = re.sub(r'\s+', '_', provider)[:40]
+            except:
+                pass
+            
+            # FALLBACK: Try extraction only if stored analysis fails
+            if not provider:
+                provider = extract_provider_name(result.get("answer", ""))
+            
+            if provider:
                 return f"Ofsted_Analysis_{provider}_{timestamp}.md"
             return f"Ofsted_Analysis_{timestamp}.md"
         
@@ -1617,6 +1767,9 @@ google = "your-google-api-key"
     if 'rag_system' not in st.session_state:
         with st.spinner("Initializing system..."):
             st.session_state.rag_system = initialize_rag_system()
+
+    if st.session_state.rag_system:
+        st.session_state.rag_system._add_ofsted_detection()
     
     if st.session_state.rag_system is None:
         st.error("❌ System initialization failed")
@@ -1652,6 +1805,19 @@ google = "your-google-api-key"
     # Feedback mechanism in sidebar
     with st.sidebar:
         st.markdown("### 📝 Beta Feedback")
+
+        st.markdown("---")
+        st.markdown("### 🔍 DEBUG INFO")
+        
+        if hasattr(st.session_state.rag_system, 'ofsted_detector'):
+            st.success("✅ Ofsted detector loaded")
+        else:
+            st.error("❌ Ofsted detector NOT loaded")
+        
+        if hasattr(st.session_state.rag_system, '_add_ofsted_detection'):
+            st.success("✅ Detection method available")
+        else:
+            st.error("❌ Detection method missing")
         
         feedback_type = st.selectbox(
             "Feedback Type:",
