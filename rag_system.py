@@ -16,6 +16,8 @@ import base64
 from io import BytesIO
 from PIL import Image
 import requests
+import hashlib
+import streamlit as st
 
 # LangChain imports
 from langchain_openai import ChatOpenAI
@@ -50,6 +52,9 @@ class OfstedReportSummary:
     key_strengths: List[str]
     areas_for_improvement: List[str]
     is_outstanding: bool
+    experiences_rating: str = "None"
+    protection_rating: str = "None" 
+    leadership_rating: str = "None"
 
 class OfstedDetector:
     """Lightweight Ofsted detection that works WITH your existing system"""
@@ -58,14 +63,40 @@ class OfstedDetector:
         pass
         
     def detect_ofsted_upload(self, uploaded_files):
-        """Detect if Ofsted reports are uploaded"""
+        """Detect if Ofsted reports are uploaded - ENHANCED with cache validation"""
         ofsted_files = []
         other_files = []
+        
+        print(f"🔍 CHECKING {len(uploaded_files)} files for Ofsted content...")
         
         for file in uploaded_files:
             content = self._extract_file_content(file)
             if self._is_ofsted_report(content, file.name):
-                report_summary = self._analyze_ofsted_report(content, file.name)
+                print(f"✅ OFSTED REPORT DETECTED: {file.name}")
+                
+                # ENHANCED CACHE with validation
+                if not hasattr(self, '_analysis_cache'):
+                    self._analysis_cache = {}
+                
+                # Create more specific cache key that includes question context
+                cache_key = f"{file.name}_{len(content)}_{hashlib.md5(content[:1000].encode()).hexdigest()[:8]}"
+                
+                if cache_key in self._analysis_cache:
+                    print(f"⚡ USING CACHED ANALYSIS for {file.name}")
+                    report_summary = self._analysis_cache[cache_key]
+                    
+                    # VALIDATE cached analysis
+                    if self._validate_ofsted_cache(report_summary, content):
+                        print(f"✅ CACHE VALIDATED for {file.name}")
+                    else:
+                        print(f"❌ CACHE INVALID, REGENERATING for {file.name}")
+                        report_summary = self._analyze_ofsted_report(content, file.name)
+                        self._analysis_cache[cache_key] = report_summary
+                else:
+                    print(f"🔄 ANALYZING {file.name} (first time)")
+                    report_summary = self._analyze_ofsted_report(content, file.name)
+                    self._analysis_cache[cache_key] = report_summary
+                
                 ofsted_files.append({
                     'file': file,
                     'content': content,
@@ -155,23 +186,45 @@ class OfstedDetector:
         return indicator_count >= 3
     
     def _analyze_ofsted_report(self, content, filename):
-        """Extract key information from Ofsted report"""
+        """Extract key information from Ofsted report - OPTIMIZED VERSION"""
+        print(f"\n🔍 ANALYZING CHILDREN'S HOME OFSTED REPORT: {filename}")
+        
         provider_name = self._extract_provider_name(content)
-        overall_rating = self._extract_overall_rating(content)
         inspection_date = self._extract_inspection_date(content)
         strengths = self._extract_strengths(content)
         improvements = self._extract_improvements(content)
-        is_outstanding = "outstanding" in overall_rating.lower()
         
-        return OfstedReportSummary(
+        # EXTRACT SECTION RATINGS ONCE AND CACHE
+        print("📋 Extracting section ratings (cached for overall rating derivation)...")
+        section_ratings = self._extract_section_ratings(content)
+        
+        # DERIVE OVERALL RATING FROM CACHED SECTION RATINGS (don't re-extract)
+        overall_rating = self._derive_overall_from_sections(section_ratings)
+        
+        is_outstanding = overall_rating == "Outstanding"
+        
+        # Create summary with cached ratings
+        summary = OfstedReportSummary(
             filename=filename,
             provider_name=provider_name,
             overall_rating=overall_rating,
             inspection_date=inspection_date,
             key_strengths=strengths,
             areas_for_improvement=improvements,
-            is_outstanding=is_outstanding
+            is_outstanding=is_outstanding,
+            experiences_rating=section_ratings.get('experiences_rating', 'None'),
+            protection_rating=section_ratings.get('protection_rating', 'None'), 
+            leadership_rating=section_ratings.get('leadership_rating', 'None')
         )
+        
+        print(f"📋 CHILDREN'S HOME OFSTED SUMMARY:")
+        print(f"  Provider: {provider_name}")
+        print(f"  Overall: {overall_rating} (derived from sections)")
+        print(f"  Experiences: {summary.experiences_rating}")
+        print(f"  Protection: {summary.protection_rating}")
+        print(f"  Leadership: {summary.leadership_rating}")
+        
+        return summary
     
     def _extract_provider_name(self, content: str) -> str:
         """Enhanced provider name extraction with better patterns"""
@@ -251,25 +304,182 @@ class OfstedDetector:
                         len(provider1_norm) > 3 and 
                         provider1_norm != "unknown provider")
 
-    def _extract_overall_rating(self, content):
-        """Extract overall rating"""
-        patterns = [
-            r'Overall effectiveness[:\s]+([^\n]+)',
-            r'Overall[:\s]+([^\n]*(?:Outstanding|Good|Requires improvement|Inadequate))',
-        ]
+    def _extract_section_ratings(self, content):
+        """Extract the 3 children's home section ratings - ROBUST VERSION"""
+        section_ratings = {}
         
-        for pattern in patterns:
-            match = re.search(pattern, content, re.IGNORECASE)
-            if match:
-                rating = match.group(1).strip()
-                for standard_rating in ["Outstanding", "Good", "Requires improvement", "Inadequate"]:
-                    if standard_rating.lower() in rating.lower():
-                        return standard_rating
+        print(f"🔍 EXTRACTING 3 CHILDREN'S HOME SECTION RATINGS from {len(content)} characters")
         
-        return "Not specified"
+        # Multi-tier patterns for different report formats
+        section_patterns = {
+            'experiences_rating': [
+                # Tier 1: Exact section headings
+                r'Overall experiences and progress of children and young people[:\s]*(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                r'Experiences and progress[:\s]*(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                
+                # Tier 2: With additional text patterns
+                r'Overall experiences and progress[^:]*:[^\n]*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                r'experiences and progress[^:]*:[^\n]*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                
+                # Tier 3: Broader context search
+                r'experiences.*?progress.*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)(?=\s|\.|\n)',
+                r'progress.*?children.*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)(?=\s|\.|\n)',
+                
+                # Tier 4: Section-based extraction (look between headings)
+                r'(?i)experiences.*?(?:rating|grade|judgment|assessment)[:\s]*(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+            ],
+            
+            'protection_rating': [
+                # Tier 1: Exact section headings
+                r'How well children and young people are helped and protected[:\s]*(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                r'Help and protection[:\s]*(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                
+                # Tier 2: With additional text
+                r'How well children[^:]*protected[^:]*:[^\n]*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                r'helped and protected[^:]*:[^\n]*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                
+                # Tier 3: Broader context
+                r'helped.*?protected.*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)(?=\s|\.|\n)',
+                r'protection.*?children.*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)(?=\s|\.|\n)',
+                r'safeguarding.*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)(?=\s|\.|\n)',
+                
+                # Tier 4: Section-based extraction
+                r'(?i)protection.*?(?:rating|grade|judgment|assessment)[:\s]*(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+            ],
+            
+            'leadership_rating': [
+                # Tier 1: Exact section headings
+                r'The effectiveness of leaders and managers[:\s]*(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                r'Leadership and management[:\s]*(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                
+                # Tier 2: With additional text
+                r'effectiveness of leaders[^:]*:[^\n]*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                r'leadership and management[^:]*:[^\n]*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+                
+                # Tier 3: Broader context
+                r'leaders.*?managers.*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)(?=\s|\.|\n)',
+                r'leadership.*?effectiveness.*?(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)(?=\s|\.|\n)',
+                
+                # Tier 4: Section-based extraction
+                r'(?i)leadership.*?(?:rating|grade|judgment|assessment)[:\s]*(Outstanding|Good|Requires [Ii]mprovement(?:\s+to\s+be\s+good)?|Inadequate)',
+            ]
+        }
+        
+        for rating_key, patterns in section_patterns.items():
+            found_rating = None
+            
+            for i, pattern in enumerate(patterns):
+                try:
+                    match = re.search(pattern, content, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+                    if match:
+                        raw_rating = match.group(1).strip()
+                        print(f"  🎯 Pattern {i+1} for {rating_key}: '{raw_rating}' (from tier {(i//3)+1})")
+                        
+                        # Normalize the rating
+                        rating_lower = raw_rating.lower()
+                        if 'requires improvement' in rating_lower:
+                            found_rating = "Requires improvement"
+                        elif 'outstanding' in rating_lower:
+                            found_rating = "Outstanding"
+                        elif 'good' in rating_lower:
+                            found_rating = "Good"
+                        elif 'inadequate' in rating_lower:
+                            found_rating = "Inadequate"
+                        
+                        if found_rating:
+                            print(f"  ✅ MATCHED {rating_key}: {found_rating}")
+                            break
+                            
+                except Exception as e:
+                    print(f"  ⚠️ Pattern {i+1} error: {e}")
+                    continue
+            
+            if not found_rating:
+                # Final fallback: look for the rating key in text and find nearby ratings
+                print(f"  🔍 FALLBACK search for {rating_key}...")
+                fallback_rating = self._fallback_rating_search(content, rating_key)
+                if fallback_rating:
+                    found_rating = fallback_rating
+                    print(f"  ✅ FALLBACK found {rating_key}: {found_rating}")
+            
+            section_ratings[rating_key] = found_rating if found_rating else "None"
+            print(f"  📝 Final {rating_key}: {section_ratings[rating_key]}")
+        
+        print(f"🎯 ALL 3 SECTION RATINGS: {section_ratings}")
+        return section_ratings
+
+    def _fallback_rating_search(self, content, rating_key):
+        """Fallback method to find ratings when main patterns fail"""
+        
+        # Keywords for each section
+        section_keywords = {
+            'experiences_rating': ['experience', 'progress', 'development', 'achievement'],
+            'protection_rating': ['protection', 'safeguard', 'safety', 'helped', 'protect'],
+            'leadership_rating': ['leadership', 'management', 'effectiveness', 'leader', 'manager']
+        }
+        
+        keywords = section_keywords.get(rating_key, [])
+        
+        # Look for ratings near these keywords
+        rating_words = ['Outstanding', 'Good', 'Requires improvement', 'Inadequate']
+        
+        # Split content into sentences/lines
+        lines = content.split('\n')
+        
+        for line in lines:
+            line_lower = line.lower()
+            
+            # Check if line contains relevant keywords
+            if any(keyword in line_lower for keyword in keywords):
+                # Look for ratings in this line and surrounding lines
+                for rating in rating_words:
+                    if rating.lower() in line_lower:
+                        print(f"    🔍 Fallback found '{rating}' near keywords: {line.strip()[:100]}...")
+                        return rating
+        
+        return None
     
+    
+    def _derive_overall_from_sections(self, section_ratings):
+        """Derive overall rating from already-extracted section ratings"""
+        
+        experiences = section_ratings.get('experiences_rating', 'None')
+        protection = section_ratings.get('protection_rating', 'None') 
+        leadership = section_ratings.get('leadership_rating', 'None')
+        
+        print(f"🔍 DERIVING OVERALL from cached sections: Exp={experiences}, Prot={protection}, Lead={leadership}")
+        
+        # Children's home overall effectiveness logic
+        ratings_hierarchy = {'Inadequate': 1, 'Requires improvement': 2, 'Good': 3, 'Outstanding': 4}
+        
+        valid_ratings = [r for r in [experiences, protection, leadership] if r in ratings_hierarchy]
+        
+        if not valid_ratings:
+            print("❌ NO VALID SECTION RATINGS FOUND")
+            return "Not specified"
+        
+        # Find the lowest rating (most restrictive)
+        lowest_rating = min(valid_ratings, key=lambda x: ratings_hierarchy.get(x, 0))
+        
+        print(f"✅ DERIVED OVERALL RATING: {lowest_rating} (from cached sections)")
+        return lowest_rating
+
+    def _extract_overall_rating(self, content):
+        """SIMPLIFIED - just call the derivation method (avoid redundant calls)"""
+        # This method is called by the old interface, redirect to section-based approach
+        section_ratings = getattr(self, '_cached_section_ratings', None)
+        
+        if section_ratings:
+            print("⚡ USING CACHED section ratings for overall derivation")
+            return self._derive_overall_from_sections(section_ratings)
+        else:
+            print("🔄 EXTRACTING sections for overall rating (first time)")
+            section_ratings = self._extract_section_ratings(content)
+            self._cached_section_ratings = section_ratings  # Cache for reuse
+            return self._derive_overall_from_sections(section_ratings)
+
     def _extract_inspection_date(self, content):
-        """Extract inspection date"""
+        """Extract inspection date - MISSING METHOD"""
         patterns = [
             r'Inspection date[:\s]+(\d{1,2}[\s/\-]\w+[\s/\-]\d{4})',
             r'(\d{1,2}[\s/\-]\w+[\s/\-]\d{4})',
@@ -278,12 +488,15 @@ class OfstedDetector:
         for pattern in patterns:
             match = re.search(pattern, content)
             if match:
-                return match.group(1).strip()
+                date = match.group(1).strip()
+                print(f"✅ FOUND INSPECTION DATE: {date}")
+                return date
         
+        print("❌ NO INSPECTION DATE FOUND")
         return "Not specified"
-    
+
     def _extract_strengths(self, content):
-        """Extract key strengths mentioned"""
+        """Extract key strengths mentioned - MISSING METHOD"""
         strengths = []
         strength_patterns = [
             r'Children\s+(?:enjoy|benefit|are\s+well|feel\s+safe)[^.]*',
@@ -299,10 +512,11 @@ class OfstedDetector:
                 if len(match.strip()) > 20:
                     strengths.append(match.strip())
         
+        print(f"✅ FOUND {len(strengths)} STRENGTHS")
         return strengths[:5]
-    
+
     def _extract_improvements(self, content):
-        """Extract areas for improvement"""
+        """Extract areas for improvement - MISSING METHOD"""
         improvements = []
         improvement_patterns = [
             r'should\s+improve[^.]*',
@@ -317,6 +531,7 @@ class OfstedDetector:
                 if len(match.strip()) > 15:
                     improvements.append(match.strip())
         
+        print(f"✅ FOUND {len(improvements)} IMPROVEMENTS")
         return improvements[:5]
     
     def enhance_question_with_ofsted_context(self, question, file_analysis):
@@ -475,7 +690,30 @@ class OfstedDetector:
         # Fallback for other cases
         return question
 
-
+    def _validate_ofsted_cache(self, cached_summary, content: str) -> bool:
+        """
+        Validate that cached Ofsted analysis is still accurate
+        """
+        try:
+            # Check if provider name makes sense for the content
+            provider_name = cached_summary.provider_name
+            if provider_name == "Unknown Provider":
+                return False
+            
+            # Check if provider name appears in content
+            if len(provider_name) > 5 and provider_name.lower() not in content.lower():
+                return False
+            
+            # Check if overall rating is valid
+            valid_ratings = ["Outstanding", "Good", "Requires improvement", "Inadequate"]
+            if cached_summary.overall_rating not in valid_ratings:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Cache validation failed: {e}")
+            return False
 
 # =============================================================================
 # ENUMS AND CONFIGURATION
@@ -1125,23 +1363,48 @@ class SmartResponseDetector:
         question_lower = question.lower()
         
         # PRIORITY 0: Document-based detection (TOP PRIORITY)
+        logger.info("🔍 CHECKING PRIORITY 0...")
         if document_type and document_confidence > 0.5:
+            logger.info(f"   ✅ High confidence document detection: {document_type}")
             # High-confidence document detection overrides everything
+            if document_type in [mode.value for mode in ResponseMode]:
+                logger.info(f"   ✅ Document type valid: {document_type}")
+                try:
+                    result_mode = ResponseMode(document_type)
+                    logger.info(f"   ✅ PRIORITY 0 RETURNING: {result_mode.value}")
+                    return result_mode
+                except Exception as e:
+                    logger.error(f"   ❌ PRIORITY 0 FAILED: {e}")
+            else:
+                logger.warning(f"   ❌ Document type {document_type} not in ResponseMode values")
+
+        
+        # PRIORITY 0: Document-based detection (TOP PRIORITY)
+        if document_type and document_confidence > 0.5:
             if document_type in [mode.value for mode in ResponseMode]:
                 logger.info(f"Document-based override: {document_type} "
                            f"(confidence: {document_confidence:.2f})")
-                return ResponseMode(document_type)
-        
+                result = ResponseMode(document_type)
+
+        # If we reach here, PRIORITY 0 didn't return - that's the bug!
+        logger.info("🔍 REACHED PRIORITY 1 - PRIORITY 0 FAILED TO RETURN!")
+
         # PRIORITY 1: Honor explicit user requests for specific analysis types
+        logger.info("🔍 CHECKING PRIORITY 1...")
         if self._is_ofsted_analysis(question_lower):
-            logger.info("Explicit Ofsted analysis request detected")
+            logger.info("   ✅ PRIORITY 1 RETURNING: OFSTED_ANALYSIS")
             return ResponseMode.OFSTED_ANALYSIS
         elif self._is_policy_analysis(question_lower):
-            logger.info("Explicit policy analysis request detected")
+            logger.info("   ✅ PRIORITY 1 RETURNING: POLICY_ANALYSIS")
             return ResponseMode.POLICY_ANALYSIS
         elif self._is_assessment_scenario(question_lower):
-            logger.info("Assessment scenario detected")
+            logger.info("   ✅ PRIORITY 1 RETURNING: BRIEF")
             return ResponseMode.BRIEF
+        else:
+            logger.info("   ⏭️ PRIORITY 1 SKIPPED")
+        
+        # Continue with more logging for each priority...
+        logger.info("🔍 CONTINUING TO PRIORITY 2...")
         
         # PRIORITY 2: File type detection from uploaded content    
         if is_file_analysis:
@@ -2840,111 +3103,88 @@ class PromptTemplateManager:
 
 **EXCELLENCE NOTE:** Outstanding is not just 'very good' - it requires innovation, sector leadership, and practices that other homes learn from. Focus on becoming a beacon of excellence that influences the entire sector."""
 
-    OUTSTANDING_BEST_PRACTICE_CONDENSED_TEMPLATE = """You are an Ofsted specialist providing concise Outstanding practice guidance.
-
-**SOURCE PRIORITY:** Use actual Outstanding Ofsted reports from knowledge base if available, otherwise use government guidance/research. Always specify source type.
+    OUTSTANDING_BEST_PRACTICE_CONDENSED_TEMPLATE = """You are an Ofsted specialist providing focused Outstanding guidance. Target 600-700 words total.
 
 **Context:** {context}
 **Query:** {question}
 
 ## OUTSTANDING PATHWAY: [PROVIDER NAME]
 
-### CURRENT vs OUTSTANDING GAP
-
-| **Assessment Area** | **CURRENT** | **OUTSTANDING TARGET** | **KEY GAP** |
-|-------------------|-------------|----------------------|-------------|
-| **Overall experiences and progress** | [Rating] | Outstanding | [Main gap to close] |
-| **Help and protection** | [Rating] | Outstanding | [Main gap to close] |
-| **Leadership and management** | [Rating] | Outstanding | [Main gap to close] |
-
-**Current Overall:** [Rating] → **Target:** Outstanding
+**Current Rating:** [Rating] → **Target:** Outstanding
 
 ---
 
 ## SECTION 1: OUTSTANDING EXPERIENCES AND PROGRESS
 
-### YOUR CURRENT POSITION: [RATING]
-**Main Gap:** [Key area where Outstanding practice exceeds current performance]
+**Current Position:** [Rating]
+**Main Gap:** [Key area to develop for Outstanding]
 
-### OUTSTANDING ACTION TO IMPLEMENT
-**Action: [Outstanding Practice Name]**
-- **Source:** [Outstanding Inspection Report OR Government Guidance OR Research Evidence]
-- **Real Example:** "[Quote from Outstanding report OR evidence from other sources]"
-- **Provider/Source:** [Outstanding home name OR document source]
-- **Your Implementation:** [How to adapt this proven practice]
-- **Timeline:** [Realistic timeframe]
+### ACTION 1: [PRIORITY IMPROVEMENT]
+- **What:** [Specific practice to implement]
+- **Why Outstanding:** [How this elevates to Outstanding level]
+- **Timeline:** [Implementation period]
+
+### ACTION 2: [SECONDARY DEVELOPMENT]
+- **What:** [Additional practice for excellence]
+- **Why Outstanding:** [Outstanding impact expected]
+- **Timeline:** [Development timeframe]
 
 ---
 
 ## SECTION 2: OUTSTANDING HELP AND PROTECTION
 
-### YOUR CURRENT POSITION: [RATING]
-**Main Gap:** [Key safeguarding area where Outstanding practice exceeds current approach]
+**Current Position:** [Rating]
+**Main Gap:** [Key safeguarding enhancement needed]
 
-### OUTSTANDING ACTION TO IMPLEMENT
-**Action: [Outstanding Safeguarding Practice]**
-- **Source:** [Source type]
-- **Real Example:** "[Evidence from source]"
-- **Provider/Source:** [Source identification]
-- **Your Implementation:** [How to develop this approach]
+### ACTION 1: [PROTECTION PRIORITY]
+- **What:** [Specific safeguarding improvement]
+- **Why Outstanding:** [How this achieves Outstanding protection]
 - **Timeline:** [Implementation period]
+
+### ACTION 2: [SAFETY ENHANCEMENT]
+- **What:** [Additional safety practice]
+- **Why Outstanding:** [Outstanding safety impact]
+- **Timeline:** [Development timeframe]
 
 ---
 
 ## SECTION 3: OUTSTANDING LEADERSHIP AND MANAGEMENT
 
-### YOUR CURRENT POSITION: [RATING]
-**Main Gap:** [Key leadership area where Outstanding practice exceeds current approach]
+**Current Position:** [Rating]
+**Main Gap:** [Key leadership development area]
 
-### OUTSTANDING ACTION TO IMPLEMENT
-**Action: [Outstanding Leadership Practice]**
-- **Source:** [Source type]
-- **Real Example:** "[Evidence from source]"
-- **Provider/Source:** [Source identification]
-- **Your Implementation:** [How to develop this leadership approach]
-- **Timeline:** [Development period]
+### ACTION 1: [LEADERSHIP PRIORITY]
+- **What:** [Specific leadership improvement]
+- **Why Outstanding:** [How this demonstrates Outstanding leadership]
+- **Timeline:** [Implementation period]
 
----
-
-## TOP 3 OUTSTANDING PRIORITIES
-
-### PRIORITY 1: [MOST CRITICAL OUTSTANDING ACTION]
-**Focus:** [Main Outstanding practice to implement]
-**Timeline:** [Implementation timeframe]
-**Source:** [Type of evidence]
-
-### PRIORITY 2: [SECOND OUTSTANDING PRIORITY]
-**Focus:** [Second Outstanding development]
-**Timeline:** [Development timeframe]
-**Source:** [Evidence type]
-
-### PRIORITY 3: [THIRD OUTSTANDING PRIORITY]
-**Focus:** [Third Outstanding advancement]
-**Timeline:** [Achievement timeframe]
-**Source:** [Evidence type]
+### ACTION 2: [MANAGEMENT EXCELLENCE]
+- **What:** [Management system enhancement]
+- **Why Outstanding:** [Outstanding management impact]
+- **Timeline:** [Development timeframe]
 
 ---
 
-## OUTSTANDING PATHWAY SUMMARY
+## IMPLEMENTATION ROADMAP
 
-### IMMEDIATE OUTSTANDING ACTIONS (Next Month)
-1. **[First Outstanding step to start]**
-2. **[Second immediate action]**
+### QUICK WINS (Next 30 Days)
+1. **[IMMEDIATE ACTION 1]:** [Brief description of first quick win]
+2. **[IMMEDIATE ACTION 2]:** [Brief description of second quick win]
 
-### SHORT-TERM OUTSTANDING GOALS (3-6 months)
-**Target:** [Key Outstanding practice to achieve]
+### SHORT-TERM GOALS (1-3 Months)
+**[STRATEGIC ACTION]:** [More substantial development requiring 1-3 months - describe what this involves and why it's crucial for Outstanding]
 
-### OUTSTANDING VISION (12-18 months)
-**Goal:** [Outstanding rating with specific excellence focus]
+### MEDIUM-TERM VISION (3-6 Months)
+**Target:** [Key Outstanding milestone to achieve]
 
 ---
 
 ## BOTTOM LINE
-**Outstanding Message:** [Key insight about achieving Outstanding in your context]
-**Outstanding Timeline:** [Realistic timeframe to Outstanding rating]
-**Critical Success Factor:** [Most important Outstanding practice to master]
+**Key to Outstanding:** [One sentence insight about achieving Outstanding]
+**Timeline to Outstanding:** [Realistic timeframe]
+**Critical Success Factor:** [Most important element to master]
 
-**EVIDENCE NOTE:** [Specify whether examples come from actual Outstanding inspections or other sources]"""
+MAINTAIN FOCUS ON ACTIONABLE GUIDANCE - 6 SPECIFIC ACTIONS PLUS IMPLEMENTATION ROADMAP."""
 
     POLICY_ANALYSIS_TEMPLATE = """You are an expert children's residential care analyst specializing in policy and procedure compliance for children's homes. Analyze policies and procedures to ensure they meet regulatory requirements and best practice standards.
 
@@ -3400,9 +3640,11 @@ Answer:"""
             return self.OFSTED_COMPARISON_TEMPLATE                          
         elif response_mode == ResponseMode.OFSTED_COMPARISON_CONDENSED:     
             return self.OFSTED_COMPARISON_CONDENSED_TEMPLATE                
-        elif response_mode == ResponseMode.OUTSTANDING_BEST_PRACTICE:       
+        elif response_mode == ResponseMode.OUTSTANDING_BEST_PRACTICE:
+            logger.info("✅ MATCHED COMPREHENSIVE - returning comprehensive template")
             return self.OUTSTANDING_BEST_PRACTICE_TEMPLATE                  
-        elif response_mode == ResponseMode.OUTSTANDING_BEST_PRACTICE_CONDENSED: 
+        elif response_mode == ResponseMode.OUTSTANDING_BEST_PRACTICE_CONDENSED:
+            logger.info("✅ MATCHED CONDENSED - returning condensed template")
             return self.OUTSTANDING_BEST_PRACTICE_CONDENSED_TEMPLATE  
         elif response_mode == ResponseMode.POLICY_ANALYSIS:
             return self.POLICY_ANALYSIS_TEMPLATE
@@ -3604,253 +3846,583 @@ class HybridRAGSystem:
     # MAIN QUERY METHOD - STREAMLIT COMPATIBLE
     # ==========================================================================
     
+    
     def query(self, question: str, k: int = 5, response_style: str = "standard", 
-                  performance_mode: str = "balanced", uploaded_files: List = None, 
-                  uploaded_images: List = None, **kwargs) -> Dict[str, Any]:
-                """
-                Enhanced query method supporting BOTH document analysis AND image analysis
-                WITH AUTOMATIC DOCUMENT TYPE DETECTION
-                """
-                start_time = time.time()
+              performance_mode: str = "balanced", uploaded_files: List = None, 
+              uploaded_images: List = None, **kwargs) -> Dict[str, Any]:
+        """
+        Enhanced query method with AUTOMATIC cache management
+        Prevents cache pollution between different query types
+        """
+        import re
+        import hashlib
+        from datetime import datetime
+        
+        perf_start = time.time()
+        start_time = time.time()
+        
+        # AUTOMATIC CACHE MANAGEMENT: Clear inappropriate cache based on query context
+        self._auto_manage_cache(question, uploaded_files, uploaded_images)
 
-                # SAFE: Add Ofsted detection if not already present
-                self._add_ofsted_detection()
+        logger.info(f"⏱️ TIMING: Cache management took {time.time() - perf_start:.2f}s")
+        perf_start = time.time()
+
+        # Check if we have Ofsted analysis before forcing standard mode
+        has_ofsted_analysis = (hasattr(self, '_last_ofsted_analysis') and 
+                              self._last_ofsted_analysis and 
+                              self._last_ofsted_analysis.get('has_ofsted'))
+
+        # Force standard mode for pure knowledge queries
+        if not uploaded_files and not uploaded_images:
+            question_lower = question.lower()
+            if (any(kw in question_lower for kw in ['what', 'regulations', 'requirements', 'how']) and
+                not any(comp_kw in question_lower for comp_kw in ['compare', 'comparison', 'vs', 'versus', 'difference'])):
+                response_style = "standard"
+                logger.info("🎯 FORCED: Standard response mode for knowledge query")
+            else:
+                logger.info(f"🎯 SKIPPED forced mode for query: [QUERY BLOCKED - {len(question_lower)} chars]")
+
+        # CACHE ISOLATION: Generate semantic cache key to prevent topic interference
+        cache_key = self._generate_semantic_cache_key(question, response_style, uploaded_files, uploaded_images, **kwargs)
+        
+        # Check if this query type should use cache
+        should_cache = self._should_use_cache(question, uploaded_files, uploaded_images)
+        
+        # Try to get from cache if appropriate
+        if should_cache and hasattr(self, '_query_cache') and cache_key in self._query_cache:
+            cached_result = self._query_cache[cache_key]
+            
+            # CRITICAL: Validate cached result matches current query intent
+            if self._validate_cached_result(question, cached_result):
+                logger.info(f"✅ Using validated cache for: {question[:50]}...")
+                return cached_result
+            else:
+                logger.warning(f"❌ Invalid cache detected, clearing: {question[:50]}...")
+                del self._query_cache[cache_key]
+        
+        # Initialize cache if not exists
+        if not hasattr(self, '_query_cache'):
+            self._query_cache = {}
+        
+        detected_document_type = None
+        document_confidence = 0.0
+
+        # SAFE: Add Ofsted detection if not already present
+        self._add_ofsted_detection()
+        
+        # SAFE: Check for Ofsted reports in uploaded files
+        original_question = question  # Store original question
+        if uploaded_files and hasattr(self, 'ofsted_detector'):
+            # Check if app.py already processed Ofsted files
+            if hasattr(self, '_last_ofsted_analysis') and self._last_ofsted_analysis:
+                logger.info("📋 Using Ofsted analysis from app.py - skipping duplicate extraction")
+                file_analysis = self._last_ofsted_analysis
+            else:
+                try:
+                    file_analysis = self.ofsted_detector.detect_ofsted_upload(uploaded_files)
                 
-                # SAFE: Check for Ofsted reports in uploaded files
-                original_question = question  # Store original question
-                if uploaded_files and hasattr(self, 'ofsted_detector'):
-                    # Check if app.py already processed Ofsted files
-                    if hasattr(self, '_last_ofsted_analysis') and self._last_ofsted_analysis:
-                        logger.info("📋 Using Ofsted analysis from app.py - skipping duplicate extraction")
-                        file_analysis = self._last_ofsted_analysis
-                        # Don't clear it here - let app.py manage it
-                    else:
-                        try:
-                            file_analysis = self.ofsted_detector.detect_ofsted_upload(uploaded_files)
-                        
-                            if file_analysis['has_ofsted']:
-                                logger.info(f"✅ Detected {len(file_analysis['ofsted_reports'])} Ofsted report(s)")
-                            
-                                # Store analysis for app.py to use
-                                self._last_ofsted_analysis = file_analysis
-                            
-                                # INTELLIGENT TEMPLATE SELECTION BASED ON SCENARIO
-                                if len(file_analysis['ofsted_reports']) == 1:
-                                    # SINGLE REPORT - Check if Outstanding pathway requested
-                                    if any(keyword in question.lower() for keyword in ['outstanding', 'best practice', 'excellence', 'sector leading']):
-                                        detected_document_type = "outstanding_best_practice"
-                                        if any(keyword in question.lower() for keyword in ['condensed', 'brief', 'quick', 'summary']):
-                                            response_style = "outstanding_best_practice_condensed"
-                                            logger.info("✅ Single Ofsted report - Outstanding pathway (condensed) requested")
-                                        else:
-                                            response_style = "outstanding_best_practice"
-                                            logger.info("✅ Single Ofsted report - Outstanding pathway (comprehensive) requested")
-                                    else:
-                                        detected_document_type = "ofsted_analysis"
-                                        response_style = "ofsted_analysis"
-                                        logger.info("✅ Single Ofsted report - standard analysis")
-                                
-                                elif len(file_analysis['ofsted_reports']) == 2:
-                                    # TWO REPORTS - Detect same home vs different homes
-                                    report1 = file_analysis['ofsted_reports'][0]
-                                    report2 = file_analysis['ofsted_reports'][1]
-                                    
-                                    # Check if same provider
-                                    same_provider = (report1['summary'].provider_name.lower().strip() == 
-                                                    report2['summary'].provider_name.lower().strip())
-                                    
-                                    if same_provider:
-                                        # SAME HOME PROGRESS - Use three sections template
-                                        detected_document_type = "ofsted_progress"
-                                        response_style = "ofsted_progress"
-                                        logger.info("✅ Same home progress tracking detected - using progress analysis template")
-                                    else:
-                                        # DIFFERENT HOMES COMPARISON
-                                        if any(keyword in question.lower() for keyword in ['condensed', 'brief', 'quick', 'summary']):
-                                            detected_document_type = "ofsted_comparison_condensed"
-                                            response_style = "ofsted_comparison_condensed"
-                                            logger.info("✅ Different homes comparison (condensed) detected")
-                                        else:
-                                            detected_document_type = "ofsted_comparison"
-                                            response_style = "ofsted_comparison"
-                                            logger.info("✅ Different homes comparison (comprehensive) detected")
-                                
-                                else:
-                                    # MULTIPLE REPORTS (3+) - Use comprehensive comparison
-                                    detected_document_type = "ofsted_comparison"
-                                    response_style = "ofsted_comparison"
-                                    logger.info(f"✅ Multiple Ofsted reports ({len(file_analysis['ofsted_reports'])}) - using comprehensive comparison")
-                                
-                                # Enhance question if empty or generic
-                                if not question.strip() or question.strip().lower() in ['analyze', 'compare', 'review', 'analyse']:
-                                    original_question_for_log = question if question.strip() else "No question provided"
-                                    
-                                    # Set default question based on scenario
-                                    if response_style.startswith('outstanding'):
-                                        default_question = "Provide an Outstanding pathway analysis showing how to achieve sector-leading excellence"
-                                    elif response_style.startswith('ofsted_comparison'):
-                                        default_question = "Provide a comprehensive comparison analysis of these Ofsted reports"
-                                    else:
-                                        default_question = "Analyze these Ofsted reports for improvement opportunities"
-                                    
-                                    question = self.ofsted_detector.enhance_question_with_ofsted_context(
-                                        default_question, 
-                                        file_analysis
-                                    )
-                                    logger.info("✅ Enhanced question with Ofsted context")
-                                    logger.info(f"🔍 ORIGINAL: {original_question_for_log}")
-                                    logger.info(f"🔍 ENHANCED: {question[:200]}...")
-                                
-                                # Override any previous document detection with Ofsted-specific logic
-                                document_confidence = 0.95  # High confidence for Ofsted detection
-                                detected_document_type = response_style  # Ensure Ofsted scenario overrides document detection
-                            else:
-                                # Clear any previous analysis (safe)
-                                self._last_ofsted_analysis = None
-                        except Exception as e:
-                            logger.warning(f"Ofsted detection failed: {e}")
-                            self._last_ofsted_analysis = None
-                elif hasattr(self, '_last_ofsted_analysis') and self._last_ofsted_analysis:
-                    # No uploaded_files but we have cached analysis from app.py
-                    logger.info("📋 Using cached Ofsted analysis from app.py")
-                    file_analysis = self._last_ofsted_analysis
+                    if file_analysis['has_ofsted']:
+                        logger.info(f"✅ Detected {len(file_analysis['ofsted_reports'])} Ofsted report(s)")
                     
-                    # Set response_style based on cached analysis
-                    if file_analysis.get('has_ofsted'):
-                        if len(file_analysis['ofsted_reports']) == 2:
-                            # Check for same provider
+                        # Store analysis for app.py to use
+                        self._last_ofsted_analysis = file_analysis
+                    
+                        # INTELLIGENT TEMPLATE SELECTION BASED ON SCENARIO
+                        if len(file_analysis['ofsted_reports']) == 1:
+                            # SINGLE REPORT - Check if Outstanding pathway requested
+                            outstanding_keywords = [
+                                'outstanding', 'best practice', 'excellence', 'sector leading',
+                                'move to outstanding', 'become outstanding', 'achieve outstanding',
+                                'reach outstanding', 'get to outstanding', 'pathway to outstanding',
+                                'outstanding rating', 'outstanding grade', 'next level',
+                                'improve to outstanding', 'journey to outstanding'
+                            ]
+                            
+                            if any(keyword in question.lower() for keyword in outstanding_keywords):
+                                # Store original question BEFORE any enhancement
+                                original_simple_question = question
+                                
+                                # BETTER: Use word boundary checking to avoid partial matches
+                                comprehensive_keywords = [
+                                    'detailed', 'comprehensive', 'thorough', 'in-depth', 'extensive',
+                                    'complete', 'full analysis', 'deep dive', 'expanded', 'elaborate'
+                                ]
+                                
+                                # Use ORIGINAL question for keyword detection
+                                has_comprehensive = any(
+                                    re.search(r'\b' + re.escape(keyword) + r'\b', original_simple_question.lower()) 
+                                    for keyword in comprehensive_keywords
+                                )
+                                
+                                # CHECK FOR COMPREHENSIVE REQUEST FIRST
+                                if has_comprehensive:
+                                    response_style = "outstanding_best_practice"
+                                    detected_document_type = "outstanding_best_practice"
+                                    document_confidence = 0.95
+                                    logger.info("✅ FRESH: Outstanding pathway (comprehensive) requested")
+                                else:
+                                    # DEFAULT TO CONDENSED
+                                    response_style = "outstanding_best_practice_condensed"
+                                    detected_document_type = "outstanding_best_practice_condensed"
+                                    document_confidence = 0.95
+                                    logger.info("✅ FRESH: Outstanding pathway (condensed) - DEFAULT")
+                            else:
+                                response_style = "ofsted_analysis"
+                                detected_document_type = "ofsted_analysis"
+                                document_confidence = 0.95
+                                logger.info("✅ Single Ofsted report - standard analysis")
+
+                        elif len(file_analysis['ofsted_reports']) == 2:
+                            # TWO REPORTS - Detect same home vs different homes
                             report1 = file_analysis['ofsted_reports'][0]
                             report2 = file_analysis['ofsted_reports'][1]
                             
+                            # Check if same provider
                             same_provider = (report1['summary'].provider_name.lower().strip() == 
                                             report2['summary'].provider_name.lower().strip())
                             
                             if same_provider:
+                                # SAME HOME PROGRESS - Use three sections template
+                                detected_document_type = "ofsted_progress"
                                 response_style = "ofsted_progress"
+                                document_confidence = 0.95
                                 logger.info("✅ Same home progress tracking detected - using progress analysis template")
                             else:
-                                response_style = "ofsted_comparison"
-                                logger.info("✅ Different homes comparison detected")
-                        elif len(file_analysis['ofsted_reports']) == 1:
-                            response_style = "ofsted_analysis"
-                            logger.info("✅ Single Ofsted report - standard analysis")
+                                # DIFFERENT HOMES COMPARISON
+                                if any(keyword in question.lower() for keyword in ['condensed', 'brief', 'quick', 'summary']):
+                                    detected_document_type = "ofsted_comparison_condensed"
+                                    response_style = "ofsted_comparison_condensed"
+                                    document_confidence = 0.95
+                                    logger.info("✅ Different homes comparison (condensed) detected")
+                                else:
+                                    detected_document_type = "ofsted_comparison"
+                                    response_style = "ofsted_comparison"
+                                    document_confidence = 0.95
+                                    logger.info("✅ Different homes comparison (comprehensive) detected")
+
                         else:
+                            # MULTIPLE REPORTS (3+) - Use comprehensive comparison
+                            detected_document_type = "ofsted_comparison"
                             response_style = "ofsted_comparison"
-                            logger.info(f"✅ Multiple Ofsted reports ({len(file_analysis['ofsted_reports'])}) - using comparison")
-                else:
-                    # No files and no cached analysis - set to None
-                    self._last_ofsted_analysis = None
-                
-                try:
-                    # Check if this involves file analysis
-                    has_files = uploaded_files and len(uploaded_files) > 0
-                    has_images = uploaded_images and len(uploaded_images) > 0
-                    is_file_analysis = has_files or has_images
+                            document_confidence = 0.95
+                            logger.info(f"✅ Multiple Ofsted reports ({len(file_analysis['ofsted_reports'])}) - using comprehensive comparison")
+                        
+                        # Enhance question if empty or generic
+                        if not question.strip() or question.strip().lower() in ['analyze', 'compare', 'review', 'analyse']:
+                            original_question_for_log = question if question.strip() else "No question provided"
+                            
+                            # Set default question based on scenario
+                            if response_style.startswith('outstanding'):
+                                default_question = "Provide an Outstanding pathway analysis showing how to achieve sector-leading excellence"
+                            elif response_style.startswith('ofsted_comparison'):
+                                default_question = "Provide a comprehensive comparison analysis of these Ofsted reports"
+                            else:
+                                default_question = "Analyze these Ofsted reports for improvement opportunities"
+                            
+                            question = self.ofsted_detector.enhance_question_with_ofsted_context(
+                                default_question, 
+                                file_analysis
+                            )
+                            logger.info("✅ Enhanced question with Ofsted context")
 
-                    # Document-based detection for uploaded files
-                    # Only initialize if NOT already set by Ofsted detection
-                    if not (hasattr(self, '_last_ofsted_analysis') and self._last_ofsted_analysis and self._last_ofsted_analysis.get('has_ofsted')):
-                        detected_document_type = None
-                        document_confidence = 0.0
-                    
-                    if has_files:
-                        # Only run document analysis if NOT already handled by Ofsted detection
-                        if not (hasattr(self, '_last_ofsted_analysis') and self._last_ofsted_analysis and self._last_ofsted_analysis.get('has_ofsted')):
-                            logger.info(f"Analyzing {len(uploaded_files)} uploaded document(s) for type detection")
-                            document_analysis = self.analyze_uploaded_document(uploaded_files[0])
-                            detected_document_type = document_analysis['recommended_template']
-                            document_confidence = document_analysis['confidence']
-                                
-                            logger.info(f"Document analysis: {document_analysis['document_type']} "
-                                        f"(confidence: {document_confidence:.2f}) -> {detected_document_type}")
-                                
-                            # Override response_style if confident detection
-                            if document_confidence > 0.5:
-                                response_style = detected_document_type
-                                logger.info(f"Document-based override: Using {response_style} template "
-                                            f"(confidence: {document_confidence:.2f})")
-                        else:
-                            logger.info("Skipping document analysis - already handled by Ofsted detection")
-                            # Use the response_style set by Ofsted detection
-                            detected_document_type = response_style
-                            document_confidence = 0.95  # High confidence for Ofsted detection
-
-                    # Process images if provided (vision AI)
-                    vision_analysis = None
-                    if has_images:
-                        logger.info(f"Processing {len(uploaded_images)} image(s) for visual analysis")
-                        if len(uploaded_images) > 1:
-                            vision_analysis = self._process_images_parallel(uploaded_images, question)
-                        else:
-                            vision_analysis = self._process_images(uploaded_images, question)
-                        is_file_analysis = True
-                        self.performance_metrics["vision_analyses"] += 1
-                    
-                    # Intelligent response mode detection
-                    if hasattr(self, '_last_ofsted_analysis') and self._last_ofsted_analysis and self._last_ofsted_analysis.get('has_ofsted'):
-                        # For Ofsted scenarios, use the response_style that was already determined
-                        detected_mode = ResponseMode(response_style)
-                        logger.info(f"Using Ofsted-determined mode: {detected_mode.value}")
+                        
+                        # Override any previous document detection with Ofsted-specific logic
+                        document_confidence = 0.95  # High confidence for Ofsted detection
+                        detected_document_type = response_style  # Ensure Ofsted scenario overrides document detection
+                        logger.info(f"🔍 OFSTED VARIABLES SET: type={detected_document_type}, confidence={document_confidence}")
+                        logger.info(f"⏱️ TIMING: Ofsted detection took {time.time() - perf_start:.2f}s")
+                        perf_start = time.time()
                     else:
-                        # For non-Ofsted scenarios, use the response detector
-                        detected_mode = self.response_detector.determine_response_mode(
-                            question, response_style, is_file_analysis, 
-                            document_type=detected_document_type,
-                            document_confidence=document_confidence
-                        )
-                    
-                    logger.info(f"Processing query with mode: {detected_mode.value}")
-                    
-                    # Get document context from SmartRouter
-                    routing_result = self._safe_retrieval(question, k)
-                    
-                    if not routing_result["success"]:
-                        return self._create_error_response(
-                            question, f"Document retrieval failed: {routing_result['error']}", start_time
-                        )
-                    
-                    # Process documents and build context
-                    processed_docs = self._process_documents(routing_result["documents"])
-                    context_text = self._build_context(processed_docs)
-                    
-                    # Build enhanced prompt
-                    prompt = self._build_vision_enhanced_prompt(
-                        question, context_text, detected_mode, vision_analysis
-                    )
-                    
-                    # Get optimal model configuration  
-                    model_config = self.llm_optimizer.select_model_config(
-                        performance_mode, detected_mode.value
-                    )
-                    
-                    # Generate response
-                    answer_result = self._generate_optimized_answer(
-                        prompt, model_config, detected_mode, performance_mode
-                    )
-                    
-                    # Create comprehensive response
-                    response = self._create_streamlit_response(
-                        question=question,
-                        answer=answer_result["answer"],
-                        documents=processed_docs,
-                        routing_info=routing_result,
-                        model_info=answer_result,
-                        detected_mode=detected_mode.value,
-                        vision_analysis=vision_analysis,
-                        start_time=start_time
-                    )
-                    
-                    # Update conversation memory and metrics
-                    self.conversation_memory.add_exchange(question, answer_result["answer"])
-                    self._update_metrics(True, time.time() - start_time, detected_mode.value)
-                    
-                    return response
-                    
+                        # Clear any previous analysis (safe)
+                        self._last_ofsted_analysis = None
                 except Exception as e:
-                    logger.error(f"Hybrid query failed: {str(e)}")
-                    self._update_metrics(False, time.time() - start_time, "error")
-                    return self._create_error_response(question, str(e), start_time)
+                    logger.warning(f"Ofsted detection failed: {e}")
+                    self._last_ofsted_analysis = None
+        
+        elif hasattr(self, '_last_ofsted_analysis') and self._last_ofsted_analysis:
+            # No uploaded_files but we have cached analysis from app.py
+            logger.info("📋 Using cached Ofsted analysis from app.py")
+            file_analysis = self._last_ofsted_analysis
             
+            # Set response_style based on cached analysis
+            if file_analysis.get('has_ofsted'):
+                if len(file_analysis['ofsted_reports']) == 2:
+                    # Check for same provider
+                    report1 = file_analysis['ofsted_reports'][0]
+                    report2 = file_analysis['ofsted_reports'][1]
+                    
+                    same_provider = (report1['summary'].provider_name.lower().strip() == 
+                                    report2['summary'].provider_name.lower().strip())
+                    
+                    if same_provider:
+                        response_style = "ofsted_progress"
+                        detected_document_type = "ofsted_progress"
+                        document_confidence = 0.95
+                        logger.info("✅ Same home progress tracking detected - using progress analysis template")
+                    else:
+                        response_style = "ofsted_comparison"
+                        detected_document_type = "ofsted_comparison"
+                        document_confidence = 0.95
+                        logger.info("✅ Different homes comparison detected")
+                elif len(file_analysis['ofsted_reports']) == 1:
+                    # SINGLE REPORT - Check if Outstanding pathway requested (CACHED VERSION)
+                    outstanding_keywords = [
+                        'outstanding', 'best practice', 'excellence', 'sector leading',
+                        'move to outstanding', 'become outstanding', 'achieve outstanding',
+                        'reach outstanding', 'get to outstanding', 'pathway to outstanding',
+                        'outstanding rating', 'outstanding grade', 'next level',
+                        'improve to outstanding', 'journey to outstanding'
+                    ]
+                    
+                    if any(keyword in question.lower() for keyword in outstanding_keywords):
+                        logger.info("🔍 RUNNING: Cached Outstanding logic section")
+                        
+                        # Store original question BEFORE any enhancement
+                        original_simple_question = question
+                        
+                        # BETTER: Use word boundary checking to avoid partial matches
+                        # SIMPLIFIED: Only use very specific comprehensive keywords
+                        comprehensive_keywords = [
+                            'detailed analysis', 'comprehensive review', 'thorough examination',
+                            'in-depth analysis', 'extensive review', 'full analysis',
+                            'deep dive analysis', 'complete breakdown'
+                        ]
+                        
+                        # Use ORIGINAL question for keyword detection
+                        has_comprehensive = any(
+                            re.search(r'\b' + re.escape(keyword) + r'\b', original_simple_question.lower()) 
+                            for keyword in comprehensive_keywords
+                        )
+
+                        # CHECK FOR COMPREHENSIVE REQUEST FIRST
+                        if has_comprehensive:
+                            response_style = "outstanding_best_practice"
+                            detected_document_type = "outstanding_best_practice"
+                            document_confidence = 0.95
+                            logger.info("✅ CACHED: Outstanding pathway (comprehensive) requested")
+                        else:
+                            # DEFAULT TO CONDENSED
+                            response_style = "outstanding_best_practice_condensed"
+                            detected_document_type = "outstanding_best_practice_condensed"
+                            document_confidence = 0.95
+                            logger.info("✅ CACHED: Outstanding pathway (condensed) - DEFAULT")
+                    else:
+                        response_style = "ofsted_analysis"
+                        detected_document_type = "ofsted_analysis"
+                        document_confidence = 0.95
+                        logger.info("✅ Single Ofsted report - standard analysis")
+                else:
+                    response_style = "ofsted_comparison"
+                    detected_document_type = "ofsted_comparison"
+                    document_confidence = 0.95
+                    logger.info(f"✅ Multiple Ofsted reports ({len(file_analysis['ofsted_reports'])}) - using comparison")
+        else:
+            # No files and no cached analysis - set to None
+            self._last_ofsted_analysis = None
+        
+        try:
+            # Check if this involves file analysis
+            has_files = uploaded_files and len(uploaded_files) > 0
+            has_images = uploaded_images and len(uploaded_images) > 0
+            is_file_analysis = has_files or has_images
+
+            # Add debug logging for document detection variables
+            logger.info(f"🔍 BEFORE DETECTOR: type={detected_document_type}, confidence={document_confidence}, response_style={response_style}")
+            
+            if has_files:
+                # Only run document analysis if NOT already handled by Ofsted detection
+                if not (hasattr(self, '_last_ofsted_analysis') and self._last_ofsted_analysis and self._last_ofsted_analysis.get('has_ofsted')):
+                    logger.info(f"Analyzing {len(uploaded_files)} uploaded document(s) for type detection")
+                    document_analysis = self.analyze_uploaded_document(uploaded_files[0])
+                    detected_document_type = document_analysis['recommended_template']
+                    document_confidence = document_analysis['confidence']
+                        
+                    logger.info(f"Document analysis: {document_analysis['document_type']} "
+                                f"(confidence: {document_confidence:.2f}) -> {detected_document_type}")
+                        
+                    # Override response_style if confident detection
+                    if document_confidence > 0.5:
+                        response_style = detected_document_type
+                        logger.info(f"Document-based override: Using {response_style} template "
+                                    f"(confidence: {document_confidence:.2f})")
+                else:
+                    logger.info("Skipping document analysis - already handled by Ofsted detection")
+                    # Use the response_style set by Ofsted detection
+                    detected_document_type = response_style
+                    document_confidence = 0.95  # High confidence for Ofsted detection
+
+            # Process images if provided (vision AI)
+            vision_analysis = None
+            if has_images:
+                logger.info(f"Processing {len(uploaded_images)} image(s) for visual analysis")
+                if len(uploaded_images) > 1:
+                    vision_analysis = self._process_images_parallel(uploaded_images, question)
+                else:
+                    vision_analysis = self._process_images(uploaded_images, question)
+                is_file_analysis = True
+                self.performance_metrics["vision_analyses"] += 1
+            
+            # Intelligent response mode detection
+            if hasattr(self, '_last_ofsted_analysis') and self._last_ofsted_analysis and self._last_ofsted_analysis.get('has_ofsted'):
+                # For Ofsted scenarios, use the response_style that was already determined
+                detected_mode = ResponseMode(response_style)
+               
+                logger.info(f"🔍 CREATED ResponseMode: {detected_mode}")
+                logger.info(f"🔍 ResponseMode.value: {detected_mode.value}")
+                logger.info(f"Using Ofsted-determined mode: {detected_mode.value}")
+            else:
+                query_type = self._detect_query_type(question.lower(), bool(uploaded_files), bool(uploaded_images))
+
+                # Force comparison mode for comparison queries
+                if query_type == 'comparison':
+                    detected_mode = ResponseMode("ofsted_comparison")
+                    logger.info(f"🎯 FORCED comparison mode based on query intent: {question[:50]}")
+                else:
+                    # Use normal detection for file queries
+                    detected_mode = self.response_detector.determine_response_mode(
+                        question, response_style, is_file_analysis, 
+                        document_type=detected_document_type,
+                        document_confidence=document_confidence
+                    )
+            
+            logger.info(f"Processing query with mode: {detected_mode.value}")
+            
+            # Get document context from SmartRouter
+            routing_result = self._safe_retrieval(question, k)
+            
+            if not routing_result["success"]:
+                return self._create_error_response(
+                    question, f"Document retrieval failed: {routing_result['error']}", start_time
+                )
+            
+            # Process documents and build context
+            processed_docs = self._process_documents(routing_result["documents"])
+            context_text = self._build_context(processed_docs)
+            
+            # Build enhanced prompt
+            prompt = self._build_vision_enhanced_prompt(
+                question, context_text, detected_mode, vision_analysis
+            )
+            
+            # Get optimal model configuration  
+            model_config = self.llm_optimizer.select_model_config(
+                performance_mode, detected_mode.value
+            )
+            
+            # Generate response
+            answer_result = self._generate_optimized_answer(
+                prompt, model_config, detected_mode, performance_mode
+            )
+            logger.info(f"⏱️ TIMING: Response generation took {time.time() - perf_start:.2f}s")
+            perf_start = time.time()
+            
+            # Create comprehensive response
+            response = self._create_streamlit_response(
+                question=question,
+                answer=answer_result["answer"],
+                documents=processed_docs,
+                routing_info=routing_result,
+                model_info=answer_result,
+                detected_mode=detected_mode.value,
+                vision_analysis=vision_analysis,
+                start_time=start_time
+            )
+            
+            # CACHE THE RESULT with validation
+            if should_cache:
+                self._store_response_with_metadata(cache_key, response, question)
+                self._cleanup_old_cache()
+            
+            # Update conversation memory and metrics
+            self.conversation_memory.add_exchange(question, answer_result["answer"])
+            self._update_metrics(True, time.time() - start_time, detected_mode.value)
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Hybrid query failed: {str(e)}")
+            self._update_metrics(False, time.time() - start_time, "error")
+            return self._create_error_response(question, str(e), start_time)        
+
+    def _store_response_with_metadata(self, cache_key: str, response: dict, question: str):
+        """
+        Store response with enhanced metadata for validation
+        """
+        from datetime import datetime
+        
+        # Add metadata to response
+        if 'metadata' not in response:
+            response['metadata'] = {}
+        
+        response['metadata'].update({
+            'cache_timestamp': datetime.now().isoformat(),
+            'query_topic': self._extract_topic_from_question(question.lower()),
+            'query_type': self._detect_query_type(question.lower(), False, False),
+            'cache_key': cache_key
+        })
+        
+        self._query_cache[cache_key] = response
+
+
+    def _auto_manage_cache(self, question: str, uploaded_files: List = None, uploaded_images: List = None):
+        question_lower = question.lower()
+        
+        # DEFINE VARIABLES FIRST
+        has_files = uploaded_files and len(uploaded_files) > 0
+        has_images = uploaded_images and len(uploaded_images) > 0
+        current_query_type = self._detect_query_type(question_lower, has_files, has_images)
+        
+        # Detect if this is a general knowledge query
+        is_general_knowledge = (
+            any(kw in question_lower for kw in ['how often', 'what are', 'when should', 'requirements', 'regulations']) and
+            not any(kw in question_lower for kw in ['this report', 'attached', 'analysis', 'compare', 'outstanding', 'route to'])
+        )
+        
+        # Clear Ofsted cache for general knowledge queries
+        if (is_general_knowledge and 
+            hasattr(self, '_last_ofsted_analysis') and 
+            self._last_ofsted_analysis):
+            
+            logger.info("🗑️ CLEARING Ofsted cache - general knowledge query detected")
+            self._last_ofsted_analysis = None
+            return
+        
+        # Existing cache preservation logic for report-specific queries
+        if (hasattr(self, '_last_ofsted_analysis') and 
+            self._last_ofsted_analysis and 
+            self._last_ofsted_analysis.get('has_ofsted') and
+            any(word in question_lower for word in ['report', 'attached', 'analysis', 'look at'])):
+            logger.info("🔒 PRESERVING Ofsted cache - query appears to be about attached reports")
+            return
+
+        # Get previous query context
+        previous_query_type = getattr(self, '_last_query_type', None)
+        
+        logger.info(f"🔍 Query type: {current_query_type}, Previous: {previous_query_type}")
+
+        # ENHANCED RULE: Knowledge query with no files - clear ALL file-related cache
+        if current_query_type == 'knowledge' and not has_files and not has_images:
+            if not any(indicator in question_lower for indicator in ['compare', 'analysis', 'report']):
+            # Clear Ofsted analysis completely
+                if hasattr(self, '_last_ofsted_analysis'):
+                    logger.info("🧹 AUTO-CLEAR: Clearing ALL Ofsted cache for pure knowledge query")
+                    self._last_ofsted_analysis = None
+            
+            # Clear cached file content
+            if hasattr(st.session_state, 'cached_file_content'):
+                logger.info("🧹 AUTO-CLEAR: Clearing cached file content")
+                st.session_state.cached_file_content = {}
+            
+            # Clear any file-related session state
+            file_related_keys = [k for k in st.session_state.keys() if 'ofsted' in str(k).lower() or 'file' in str(k).lower()]
+            for key in file_related_keys:
+                if key != 'rag_system':  # Don't clear the main system
+                    logger.info(f"🧹 AUTO-CLEAR: Clearing session key: {key}")
+                    del st.session_state[key]
+        
+        # Rule 1: Knowledge query after file analysis - clear Ofsted cache
+        if current_query_type == 'knowledge' and previous_query_type in ['ofsted_analysis', 'file_analysis']:
+            if hasattr(self, '_last_ofsted_analysis') and self._last_ofsted_analysis:
+                logger.info("🧹 AUTO-CLEAR: Clearing Ofsted cache for knowledge query")
+                self._last_ofsted_analysis = None
+        
+        # Rule 2: Different file analysis - clear previous file cache
+        if current_query_type == 'file_analysis' and previous_query_type == 'file_analysis':
+            if hasattr(self, '_last_ofsted_analysis'):
+                logger.info("🧹 AUTO-CLEAR: Clearing previous file analysis cache")
+                self._last_ofsted_analysis = None
+        
+        # Rule 3: Ofsted analysis after knowledge query - clear general cache
+        if current_query_type == 'ofsted_analysis' and previous_query_type == 'knowledge':
+            if hasattr(self, '_query_cache'):
+                # Clear knowledge-based cache entries
+                knowledge_keys = [k for k in self._query_cache.keys() if 'knowledge' in k or 'general' in k]
+                for key in knowledge_keys:
+                    del self._query_cache[key]
+                if knowledge_keys:
+                    logger.info(f"🧹 AUTO-CLEAR: Cleared {len(knowledge_keys)} knowledge cache entries")
+        
+        # Rule 4: Topic change - clear topic-specific cache
+        current_topic = self._extract_topic_from_question(question_lower)
+        previous_topic = getattr(self, '_last_topic', None)
+        
+        if current_topic != previous_topic and previous_topic is not None:
+            if hasattr(self, '_query_cache'):
+                # Clear cache entries from different topic
+                topic_keys = [k for k in self._query_cache.keys() if previous_topic in k]
+                for key in topic_keys:
+                    del self._query_cache[key]
+                if topic_keys:
+                    logger.info(f"🧹 AUTO-CLEAR: Topic change {previous_topic}→{current_topic}, cleared {len(topic_keys)} entries")
+        
+        # Rule 5: Time-sensitive queries - always clear cache
+        if self._is_time_sensitive_query(question_lower):
+            if hasattr(self, '_query_cache'):
+                self._query_cache.clear()
+                logger.info("🧹 AUTO-CLEAR: Time-sensitive query, cleared all cache")
+            if hasattr(self, '_last_ofsted_analysis'):
+                self._last_ofsted_analysis = None
+        
+        # Store current context for next query
+        self._last_query_type = current_query_type
+        self._last_topic = current_topic
+
+    def _detect_query_type(self, question_lower: str, has_files: bool, has_images: bool) -> str:
+        """
+        Detect the type of query to apply appropriate cache management
+        FIXED: File-based queries take priority over generic comparison detection
+        """
+        
+        # PRIORITY 1: File-based queries (most specific)
+        if has_files or has_images:
+            if any(indicator in question_lower for indicator in ['ofsted', 'inspection', 'report']):
+                return 'ofsted_analysis'
+            else:
+                return 'file_analysis'
+        
+        # PRIORITY 2: Explicit comparison queries (only for non-file queries)
+        if any(indicator in question_lower for indicator in [
+            'compare', 'versus', 'vs', 'difference between', 'better than', 'comparison'
+        ]):
+            return 'comparison'
+        
+        # PRIORITY 3: Knowledge-based queries (no files)
+        if any(indicator in question_lower for indicator in [
+            'what are', 'what is', 'how do', 'how to', 'explain', 'define', 
+            'regulations', 'requirements', 'policy', 'procedure'
+        ]):
+            return 'knowledge'
+        
+        return 'general'
+
+    def _extract_topic_from_question(self, question_lower: str) -> str:
+        """
+        Extract the main topic from a question
+        """
+        topic_keywords = {
+            'recruitment': ['recruitment', 'recruiting', 'hiring', 'safer recruitment', 'background', 'dbs'],
+            'safeguarding': ['safeguarding', 'protection', 'safety', 'abuse', 'neglect', 'risk'],
+            'compliance': ['regulation', 'ofsted', 'inspection', 'compliance', 'standards'],
+            'policies': ['policy', 'procedure', 'guidelines', 'framework'],
+            'training': ['training', 'development', 'skills', 'competency'],
+            'management': ['leadership', 'management', 'governance', 'oversight']
+        }
+        
+        for topic, keywords in topic_keywords.items():
+            if any(keyword in question_lower for keyword in keywords):
+                return topic
+        
+        return 'general'
+
+    def _is_time_sensitive_query(self, question_lower: str) -> bool:
+        """
+        Check if query is time-sensitive and should not use cache
+        """
+        time_indicators = [
+            'current', 'latest', 'recent', 'today', 'now', 'this year', '2025',
+            'new', 'updated', 'changed', 'revised'
+        ]
+        return any(indicator in question_lower for indicator in time_indicators)
 
     def _safe_retrieval(self, question: str, k: int) -> Dict[str, Any]:
         """Use SmartRouter for stable document retrieval - avoids FAISS issues"""
@@ -4552,6 +5124,186 @@ DOCUMENT CONTEXT:
         if mode not in self.performance_metrics["mode_usage"]:
             self.performance_metrics["mode_usage"][mode] = 0
         self.performance_metrics["mode_usage"][mode] += 1
+
+    def _generate_semantic_cache_key(self, question: str, response_style: str, 
+                                    uploaded_files: List = None, uploaded_images: List = None, **kwargs) -> str:
+        """
+        Generate semantic cache key that prevents topic interference
+        """
+        # Identify query topic to prevent cross-topic contamination
+        question_lower = question.lower()
+        
+        topic_keywords = {
+            'recruitment': ['recruitment', 'recruiting', 'hiring', 'safer recruitment', 'background', 'dbs'],
+            'safeguarding': ['safeguarding', 'protection', 'safety', 'abuse', 'neglect', 'risk'],
+            'compliance': ['regulation', 'ofsted', 'inspection', 'compliance', 'standards'],
+            'policies': ['policy', 'procedure', 'guidelines', 'framework'],
+            'comparison': ['compare', 'versus', 'vs', 'difference', 'analysis between'],
+            'ofsted_analysis': ['ofsted report', 'inspection report', 'provider overview']
+        }
+        
+        # Determine primary topic
+        primary_topic = 'general'
+        max_matches = 0
+        
+        for topic, keywords in topic_keywords.items():
+            matches = sum(1 for keyword in keywords if keyword in question_lower)
+            if matches > max_matches:
+                max_matches = matches
+                primary_topic = topic
+        
+        # Create cache key components
+        cache_components = {
+            'topic': primary_topic,
+            'question_hash': hashlib.md5(question.lower().strip().encode()).hexdigest()[:12],
+            'response_style': response_style,
+            'has_files': bool(uploaded_files),
+            'has_images': bool(uploaded_images),
+            'session_hour': datetime.now().strftime('%Y%m%d_%H')  # Hour-level cache expiry
+        }
+        
+        # Add file context to prevent file/non-file interference
+        if uploaded_files:
+            file_info = f"files_{len(uploaded_files)}"
+            cache_components['file_context'] = file_info
+        
+        if uploaded_images:
+            image_info = f"images_{len(uploaded_images)}"
+            cache_components['image_context'] = image_info
+        
+        # Create final cache key
+        cache_string = "_".join([
+            cache_components['topic'],
+            cache_components['question_hash'],
+            cache_components['response_style'],
+            cache_components.get('file_context', 'nofiles'),
+            cache_components.get('image_context', 'noimages'),
+            cache_components['session_hour']
+        ])
+        
+        return f"rag_cache_{hashlib.md5(cache_string.encode()).hexdigest()}"
+
+    def _should_use_cache(self, question: str, uploaded_files: List = None, uploaded_images: List = None) -> bool:
+        """
+        Enhanced cache decision with automatic management
+        """
+        question_lower = question.lower()
+        
+        # Never cache time-sensitive queries
+        if self._is_time_sensitive_query(question_lower):
+            return False
+        
+        # Never cache file/image analysis (too context-specific)
+        if uploaded_files or uploaded_images:
+            return False
+        
+        # Never cache if we just cleared related cache
+        query_type = self._detect_query_type(question_lower, False, False)
+        if hasattr(self, '_cache_cleared_for_type') and query_type in self._cache_cleared_for_type:
+            # Remove from cleared list and don't cache this query
+            self._cache_cleared_for_type.remove(query_type)
+            return False
+        
+        return True
+
+    def _validate_cached_result(self, question: str, cached_result: dict) -> bool:
+        """
+        Enhanced validation with automatic cache management context
+        """
+        if not cached_result or not cached_result.get('answer'):
+            return False
+        
+        question_lower = question.lower()
+        answer_lower = cached_result['answer'].lower()
+        
+        # Check cache age - don't use cache older than 1 hour
+        if 'metadata' in cached_result:
+            cache_time = cached_result['metadata'].get('cache_timestamp')
+            if cache_time:
+                try:
+                    from datetime import datetime
+                    cache_dt = datetime.fromisoformat(cache_time)
+                    age_hours = (datetime.now() - cache_dt).total_seconds() / 3600
+                    if age_hours > 1:
+                        logger.info(f"❌ Cache too old: {age_hours:.1f} hours")
+                        return False
+                except:
+                    pass
+        
+        # SPECIFIC VALIDATION for safer recruitment issue
+        if any(keyword in question_lower for keyword in ['recruitment', 'hiring', 'safer recruitment']):
+            # Recruitment question should NOT return comparison template
+            invalid_patterns = [
+                'comparison analysis between two children\'s homes',
+                'higher-rated provider',
+                'lower-rated provider',
+                'extract the actual provider names',
+                'overall ratings from the inspection reports',
+                'ofsted reports',
+                'inspection reports'
+            ]
+            
+            if any(pattern in answer_lower for pattern in invalid_patterns):
+                logger.warning(f"❌ INVALID CACHE: Recruitment query got comparison template")
+                return False
+        
+        # Check for topic mismatch
+        current_topic = self._extract_topic_from_question(question_lower)
+        cached_topic = cached_result.get('metadata', {}).get('query_topic', '')
+        
+        if cached_topic and current_topic != cached_topic:
+            logger.warning(f"❌ TOPIC MISMATCH: Current={current_topic}, Cached={cached_topic}")
+            return False
+        
+        # Check for general relevance
+        question_terms = set(re.findall(r'\b\w{4,}\b', question_lower))
+        question_terms -= {'what', 'how', 'when', 'where', 'why', 'should', 'would', 'could'}
+        
+        if question_terms:
+            # At least 40% of key question terms should appear in answer
+            term_matches = sum(1 for term in question_terms if term in answer_lower)
+            relevance_ratio = term_matches / len(question_terms)
+            
+            if relevance_ratio < 0.4:
+                logger.warning(f"❌ LOW RELEVANCE: Only {relevance_ratio:.1%} term overlap")
+                return False
+        
+        return True
+
+    def _cleanup_old_cache(self):
+        """
+        Clean up old cache entries to prevent memory issues
+        """
+        if not hasattr(self, '_query_cache'):
+            return
+        
+        if len(self._query_cache) <= 50:  # Keep reasonable number of entries
+            return
+        
+        # Remove oldest entries (simple approach - remove half)
+        cache_keys = list(self._query_cache.keys())
+        keys_to_remove = cache_keys[:len(cache_keys)//2]
+        
+        for key in keys_to_remove:
+            if key in self._query_cache:
+                del self._query_cache[key]
+        
+        logger.info(f"🧹 Cleaned up {len(keys_to_remove)} old cache entries")
+
+    def clear_cache(self):
+        """
+        Clear all query cache - useful for debugging
+        """
+        if hasattr(self, '_query_cache'):
+            cache_count = len(self._query_cache)
+            self._query_cache.clear()
+            logger.info(f"🧹 Cleared {cache_count} query cache entries")
+        
+        # Also clear Ofsted detector cache
+        if hasattr(self, 'ofsted_detector') and hasattr(self.ofsted_detector, '_analysis_cache'):
+            ofsted_cache_count = len(self.ofsted_detector._analysis_cache)
+            self.ofsted_detector._analysis_cache.clear()
+            logger.info(f"🧹 Cleared {ofsted_cache_count} Ofsted analysis cache entries")
     
     # ==========================================================================
     # SPECIALIZED ANALYSIS METHODS

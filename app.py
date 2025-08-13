@@ -9,9 +9,11 @@ import hashlib
 from pathlib import Path
 import streamlit as st
 import time
-import datetime
+from datetime import datetime, timedelta
 from PIL import Image
 import io
+import re
+from typing import Dict, Any, Optional, List
 
 # Optional imports for document processing
 try:
@@ -116,6 +118,8 @@ def setup_sqlite_with_clean_logging():
 
 # STEP 4: Regular imports
 from rag_system import HybridRAGSystem as EnhancedRAGSystem, create_rag_system
+from phase1_enhancements import enhance_your_rag_system, test_enhancement_integration
+from phase2_metadata_chunking import integrate_phase2_with_existing_rag, test_phase2_integration
 
 # Safe import for compliance features
 try:
@@ -658,6 +662,148 @@ def clean_source_title(title, source_file, index):
     
     return title
 
+# ===== ENHANCED CACHE MANAGEMENT FUNCTIONS =====
+def generate_smart_cache_key(question: str, document_files=None, image_files=None) -> str:
+    """
+    Generate cache key that prevents topic interference
+    """
+    # Normalize the question
+    normalized_question = re.sub(r'\s+', ' ', question.lower().strip())
+    
+    # Identify primary topic to prevent cross-topic interference
+    topic_keywords = {
+        'recruitment': ['recruitment', 'recruiting', 'hiring', 'staff', 'safer recruitment', 'background', 'dbs'],
+        'safeguarding': ['safeguarding', 'protection', 'safety', 'abuse', 'neglect', 'risk', 'harm'],
+        'compliance': ['regulation', 'ofsted', 'inspection', 'compliance', 'standards', 'legal'],
+        'policies': ['policy', 'policies', 'procedure', 'guidelines', 'framework'],
+        'training': ['training', 'development', 'skills', 'competency', 'education'],
+        'management': ['leadership', 'management', 'governance', 'oversight', 'strategy'],
+        'comparison': ['compare', 'versus', 'vs', 'difference', 'better', 'analysis between', 'transferable'],
+        'ofsted_analysis': ['ofsted report', 'inspection report', 'provider overview', 'rating']
+    }
+    
+    # Determine primary topic
+    primary_topic = 'general'
+    max_matches = 0
+    
+    for topic, keywords in topic_keywords.items():
+        matches = sum(1 for keyword in keywords if keyword in normalized_question)
+        if matches > max_matches:
+            max_matches = matches
+            primary_topic = topic
+    
+    # Create context indicators
+    context_parts = [primary_topic]
+    
+    # Add file context to prevent document/image interference
+    if document_files:
+        context_parts.append(f"docs_{len(document_files)}")
+        # Add file types to context
+        file_types = set()
+        for file in document_files:
+            if hasattr(file, 'name'):
+                ext = file.name.split('.')[-1].lower()
+                file_types.add(ext)
+        if file_types:
+            context_parts.append(f"types_{'_'.join(sorted(file_types))}")
+    
+    if image_files:
+        context_parts.append(f"imgs_{len(image_files)}")
+    
+    # Add recent context to prevent immediate interference
+    recent_context = ""
+    if 'last_question_topic' in st.session_state:
+        if st.session_state.last_question_topic != primary_topic:
+            # Different topic - ensure cache separation
+            recent_context = f"_prev_{st.session_state.last_question_topic}"
+    
+    # Create cache key components
+    cache_components = {
+        'topic': primary_topic,
+        'question_hash': hashlib.md5(normalized_question.encode()).hexdigest()[:8],
+        'context': '_'.join(context_parts),
+        'session_hour': datetime.now().strftime('%Y%m%d_%H'),  # Hour-level isolation
+        'recent': recent_context
+    }
+    
+    # Generate final cache key
+    cache_string = f"{cache_components['topic']}_{cache_components['question_hash']}_{cache_components['context']}{cache_components['recent']}_{cache_components['session_hour']}"
+    cache_key = f"smart_cache_{hashlib.md5(cache_string.encode()).hexdigest()}"
+    
+    # Store current topic for next question
+    st.session_state.last_question_topic = primary_topic
+    
+    return cache_key
+
+def validate_cached_response(query: str, cached_response: str, cached_query: str = "") -> bool:
+    """
+    Validate that cached response actually matches the current query intent
+    """
+    if not cached_response or len(cached_response.strip()) < 20:
+        return False
+    
+    query_lower = query.lower()
+    response_lower = cached_response.lower()
+    
+    # Extract key terms from current query
+    query_terms = set(re.findall(r'\b\w{4,}\b', query_lower))
+    query_terms -= {'what', 'how', 'when', 'where', 'why', 'should', 'would', 'could'}
+    
+    # Check if response contains relevant terms from query
+    if query_terms:
+        term_matches = sum(1 for term in query_terms if term in response_lower)
+        relevance_ratio = term_matches / len(query_terms)
+        
+        if relevance_ratio < 0.3:  # Less than 30% relevance
+            return False
+    
+    # Specific validation patterns to prevent topic interference
+    validation_checks = {
+        'recruitment_query': {
+            'query_patterns': ['recruitment', 'recruiting', 'hiring', 'safer recruitment', 'background check'],
+            'invalid_response_patterns': ['comparison between', 'higher-rated provider', 'provider analysis', 'outstanding vs good']
+        },
+        'safeguarding_query': {
+            'query_patterns': ['safeguarding', 'protection', 'safety', 'abuse', 'risk'],
+            'invalid_response_patterns': ['recruitment process', 'hiring staff', 'provider comparison']
+        },
+        'comparison_query': {
+            'query_patterns': ['compare', 'versus', 'vs', 'difference', 'analysis between'],
+            'invalid_response_patterns': ['recruitment regulations', 'safeguarding requirements'] if 'compare' not in query_lower else []
+        },
+        'ofsted_query': {
+            'query_patterns': ['ofsted', 'inspection report', 'provider overview'],
+            'invalid_response_patterns': ['recruitment regulations', 'policy requirements'] if 'ofsted' not in query_lower else []
+        }
+    }
+    
+    # Run validation checks
+    for check_name, patterns in validation_checks.items():
+        query_matches = any(pattern in query_lower for pattern in patterns['query_patterns'])
+        
+        if query_matches:
+            # This is a query of this type, check for invalid response patterns
+            has_invalid_patterns = any(pattern in response_lower for pattern in patterns['invalid_response_patterns'])
+            if has_invalid_patterns:
+                return False
+    
+    return True
+
+def enhanced_session_state_management():
+    """
+    Enhanced session state management to track query context
+    """
+    if 'query_history' not in st.session_state:
+        st.session_state.query_history = []
+    
+    if 'last_question_topic' not in st.session_state:
+        st.session_state.last_question_topic = 'general'
+    
+    if 'cache_validation_enabled' not in st.session_state:
+        st.session_state.cache_validation_enabled = True
+
+
+
 # ===== UNIFIED INTERFACE FUNCTIONS =====
 def show_unified_input_interface():
     """Single unified input interface for all interactions"""
@@ -746,6 +892,30 @@ def process_unified_request(user_question, uploaded_files=None):
     image_files = []
     document_files = []
     
+    cache_key = generate_smart_cache_key(user_question, document_files, image_files)
+    
+    # Check for valid cached response
+    if cache_key in st.session_state:
+        cached_data = st.session_state[cache_key]
+        cached_response = cached_data.get('response', '')
+        cached_question = cached_data.get('question', '')
+        
+        # Validate cached response
+        if validate_cached_response(user_question, cached_response, cached_question):
+            # Use cached result
+            st.session_state.ui_state.update({
+                'current_result': cached_data,
+                'last_asked_question': user_question,
+                'show_sources': False,
+                'show_analytics': False
+            })
+            st.success("⚡ Using validated cached response")
+            st.rerun()
+            return
+        else:
+            # Invalid cache - remove it
+            del st.session_state[cache_key]
+
     if uploaded_files:
         for file in uploaded_files:
             file_extension = file.name.split('.')[-1].lower()
@@ -926,6 +1096,17 @@ def process_unified_request(user_question, uploaded_files=None):
                     else:
                         summary = ofsted_analysis['ofsted_reports'][0]['summary']
                         st.info(f"📋 Ofsted analysis completed for {summary.provider_name} ({summary.overall_rating})")
+
+        if result and result.get("answer"):
+            # Cache the result
+            cache_data = {
+                'response': result.get("answer"),
+                'sources': result.get("sources", []),
+                'metadata': result.get("metadata", {}),
+                'question': user_question,
+                'timestamp': datetime.now().isoformat()
+            }
+            st.session_state[cache_key] = cache_data
 
             st.rerun()
             
@@ -1768,8 +1949,11 @@ google = "your-google-api-key"
         with st.spinner("Initializing system..."):
             st.session_state.rag_system = initialize_rag_system()
 
-    if st.session_state.rag_system:
-        st.session_state.rag_system._add_ofsted_detection()
+            if st.session_state.rag_system:
+                st.session_state.rag_system._add_ofsted_detection()
+                st.session_state.rag_system = integrate_phase2_with_existing_rag(st.session_state.rag_system)
+                st.session_state.rag_system = enhance_your_rag_system(st.session_state.rag_system)
+                  
     
     if st.session_state.rag_system is None:
         st.error("❌ System initialization failed")
@@ -1778,6 +1962,7 @@ google = "your-google-api-key"
     
     # CRITICAL: Ensure UI state is initialized early
     ensure_ui_state()
+    enhanced_session_state_management()
     
     # Load CSS once
     st.markdown(get_app_css(), unsafe_allow_html=True)
@@ -1857,6 +2042,65 @@ google = "your-google-api-key"
                 key="debug_mode_checkbox_widget"
             )
             
+            st.markdown("---")
+            st.markdown("### 🚀 Phase 1 Enhancement Status")
+            
+            if hasattr(st.session_state.rag_system, 'enhanced_processor'):
+                st.success("✅ Phase 1 enhancements ACTIVE")
+                
+                # Test button
+                if st.button("🧪 Test Enhancements", key="test_enhancements_btn"):
+                    with st.spinner("Testing Phase 1 integration..."):
+                        test_result = test_enhancement_integration(st.session_state.rag_system)
+                        
+                        st.write("**Integration Test Results:**")
+                        for key, value in test_result.items():
+                            if key == 'error':
+                                st.error(f"❌ {key}: {value}")
+                            elif isinstance(value, bool):
+                                st.write(f"{'✅' if value else '❌'} {key}: {value}")
+                            else:
+                                st.write(f"ℹ️ {key}: {value}")
+                
+                # Show last enhancement data if available
+                if st.session_state.ui_state.get('current_result'):
+                    result = st.session_state.ui_state['current_result']
+                    enhancement_data = result.get('enhancement_data')
+                    if enhancement_data:
+                        with st.expander("🔍 Last Query Enhancement Data"):
+                            st.json(enhancement_data)
+            else:
+                st.error("❌ Phase 1 enhancements NOT ACTIVE")
+                st.info("Check integration: enhanced_processor not found")
+
+            if hasattr(st.session_state.rag_system, '_phase2_enhanced'):
+                st.success("✅ Phase 2 enhancements ACTIVE (Metadata & Chunking)")
+                
+                # Test button
+                if st.button("🧪 Test Phase 2", key="test_phase2_btn"):
+                    with st.spinner("Testing Phase 2 integration..."):
+                        test_result = test_phase2_integration(st.session_state.rag_system)
+                        
+                        st.write("**Phase 2 Test Results:**")
+                        for key, value in test_result.items():
+                            if key == 'error':
+                                st.error(f"❌ {key}: {value}")
+                            elif isinstance(value, bool):
+                                st.write(f"{'✅' if value else '❌'} {key}: {value}")
+                            else:
+                                st.write(f"ℹ️ {key}: {value}")
+                
+                # Show last enhancement data if available
+                if st.session_state.ui_state.get('current_result'):
+                    result = st.session_state.ui_state['current_result']
+                    phase2_data = result.get('phase2_data')
+                    if phase2_data:
+                        with st.expander("🔍 Last Query Phase 2 Data"):
+                            st.json(phase2_data)
+            else:
+                st.error("❌ Phase 2 enhancements NOT ACTIVE")
+                st.info("Check integration: phase2_processor not found")
+
             if debug_mode != current_debug:
                 if debug_mode:
                     os.environ['DEBUG_MODE'] = 'true'
