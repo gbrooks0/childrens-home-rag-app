@@ -1,0 +1,18 @@
+{
+  "openai": {
+    "model": "text-embedding-3-large",
+    "dimensions": 3072,
+    "description": "High-performance OpenAI embedding model",
+    "actual_dimensions": 3072,
+    "status": "active",
+    "initialized_at": "2025-08-14T19:59:43.386712"
+  },
+  "google": {
+    "model": "models/text-embedding-004",
+    "dimensions": 768,
+    "description": "Google Gemini embedding model",
+    "actual_dimensions": 768,
+    "status": "active",
+    "initialized_at": "2025-08-14T19:59:43.785631"
+  }
+}

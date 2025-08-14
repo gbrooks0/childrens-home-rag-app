@@ -1,0 +1,102 @@
+{
+  "providers": {
+    "openai": {
+      "total_queries": 10,
+      "total_response_time": 7.2692177295684814,
+      "success_count": 10,
+      "average_results": 0,
+      "pattern_performance": {
+        "general": {
+          "queries": 10,
+          "avg_response_time": 0,
+          "success_rate": 0
+        }
+      },
+      "recent_queries": [
+        {
+          "timestamp": "2025-08-08T08:21:04.293309",
+          "query": "Using the signs of safety framework, please advise on the following case;\n\nTyreece (7) lives with hi",
+          "response_time": 1.8251690864562988,
+          "result_count": 3,
+          "pattern": "general",
+          "success": true
+        },
+        {
+          "timestamp": "2025-08-08T08:22:07.430472",
+          "query": "Using the signs of safety framework, please advise on the following case;\n\nTyreece (7) lives with hi",
+          "response_time": 1.4791905879974365,
+          "result_count": 5,
+          "pattern": "general",
+          "success": true
+        },
+        {
+          "timestamp": "2025-08-08T08:23:13.922816",
+          "query": "Using the signs of safety framework, please advise on the following case;\n\nTyreece (7) lives with hi",
+          "response_time": 1.0850989818572998,
+          "result_count": 8,
+          "pattern": "general",
+          "success": true
+        },
+        {
+          "timestamp": "2025-08-08T08:24:40.210896",
+          "query": "Using the signs of safety framework, please advise on the following case;\n\nTyreece (7) lives with hi",
+          "response_time": 0.4436988830566406,
+          "result_count": 8,
+          "pattern": "general",
+          "success": true
+        },
+        {
+          "timestamp": "2025-08-08T08:24:55.872631",
+          "query": "Using the signs of safety framework, please advise on the following case;\n\nTyreece (7) lives with hi",
+          "response_time": 0.3071882724761963,
+          "result_count": 8,
+          "pattern": "general",
+          "success": true
+        },
+        {
+          "timestamp": "2025-08-08T08:26:05.645431",
+          "query": "Using the signs of safety framework, please advise on the following case;\n\nTyreece (7) lives with hi",
+          "response_time": 0.35912203788757324,
+          "result_count": 5,
+          "pattern": "general",
+          "success": true
+        },
+        {
+          "timestamp": "2025-08-08T08:26:48.020193",
+          "query": "Using the signs of safety framework, please advise on the following case;\n\nTyreece (7) lives with hi",
+          "response_time": 0.3658599853515625,
+          "result_count": 3,
+          "pattern": "general",
+          "success": true
+        },
+        {
+          "timestamp": "2025-08-08T08:34:04.939444",
+          "query": "What are key safeguarding policies for children's homes?",
+          "response_time": 0.4049849510192871,
+          "result_count": 3,
+          "pattern": "general",
+          "success": true
+        },
+        {
+          "timestamp": "2025-08-08T08:34:11.048084",
+          "query": "What are key safeguarding policies for children's homes?",
+          "response_time": 0.6780591011047363,
+          "result_count": 3,
+          "pattern": "general",
+          "success": true
+        },
+        {
+          "timestamp": "2025-08-08T08:34:17.129799",
+          "query": "What are key safeguarding policies for children's homes?",
+          "response_time": 0.3208458423614502,
+          "result_count": 3,
+          "pattern": "general",
+          "success": true
+        }
+      ]
+    }
+  },
+  "query_patterns": {},
+  "last_updated": "2025-08-08T08:34:17.129825",
+  "total_queries": 10
+}

@@ -1,0 +1,61 @@
+{
+  "total_documents": 2933,
+  "total_chunks": 6103,
+  "databases_created": {
+    "openai": {
+      "status": "success",
+      "database_path": "indexes/openai_index",
+      "chunks_count": 6103,
+      "creation_time": 53.50815391540527,
+      "embedding_model": "text-embedding-3-large",
+      "dimensions": 3072
+    },
+    "google": {
+      "status": "success",
+      "database_path": "indexes/google_index",
+      "chunks_count": 6103,
+      "creation_time": 104.88481569290161,
+      "embedding_model": "models/text-embedding-004",
+      "dimensions": 768
+    }
+  },
+  "ingestion_date": "2025-08-07T22:15:16.690935",
+  "chunk_size": 1500,
+  "chunk_overlap": 300,
+  "smart_routing_config": {
+    "default_provider": "openai",
+    "query_patterns": {
+      "technical": [
+        "code",
+        "programming",
+        "api",
+        "algorithm",
+        "software"
+      ],
+      "legal": [
+        "regulation",
+        "compliance",
+        "policy",
+        "framework",
+        "guidance"
+      ],
+      "general": [
+        "what",
+        "how",
+        "why",
+        "explain",
+        "describe"
+      ]
+    },
+    "provider_strengths": {
+      "openai": [
+        "technical",
+        "general"
+      ],
+      "google": [
+        "legal",
+        "general"
+      ]
+    }
+  }
+}
