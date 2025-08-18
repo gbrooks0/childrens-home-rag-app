@@ -552,3 +552,75 @@ Total quality documents loaded: 2933
 2025-08-14 20:00:24,887 - INFO - Saved openai index to indexes/openai_index (7256 vectors)
 2025-08-14 20:00:24,999 - INFO - Saved google index to indexes/google_index (7256 vectors)
 2025-08-14 20:00:25,004 - INFO - ✅ Incremental update completed successfully!
+2025-08-18 19:39:32,305 - INFO - 
+[1/4] Initializing embedding models...
+2025-08-18 19:39:32,308 - INFO - Initializing embedding models...
+2025-08-18 19:39:36,299 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-18 19:39:36,311 - INFO - ✓ OPENAI: text-embedding-3-large (dimensions: 3072)
+2025-08-18 19:39:36,707 - INFO - ✓ GOOGLE: models/text-embedding-004 (dimensions: 768)
+2025-08-18 19:39:36,709 - INFO - Model information saved to metadata/embedding_models.json
+2025-08-18 19:39:36,709 - INFO - ✅ Active providers: openai, google
+2025-08-18 19:39:36,716 - INFO - 
+[2/4] Running incremental update...
+2025-08-18 19:39:36,716 - INFO - 🔍 Detecting document changes...
+2025-08-18 19:39:36,952 - INFO - Loading URLs from: docs/urls.txt
+2025-08-18 19:39:36,952 - INFO - Loaded 15 URLs from docs/urls.txt
+2025-08-18 19:39:36,952 - INFO - Change detection: 28 new, 0 modified, 0 deleted
+2025-08-18 19:39:36,952 - INFO - 💾 Creating backup of existing indexes...
+2025-08-18 19:39:37,114 - INFO - Backed up openai index to backups/20250818_193936/openai_index
+2025-08-18 19:39:37,180 - INFO - Backed up google index to backups/20250818_193936/google_index
+2025-08-18 19:39:37,199 - INFO - Backup created at backups/20250818_193936
+2025-08-18 19:39:37,199 - INFO - 📂 Loading existing indexes...
+2025-08-18 19:39:37,301 - INFO - Loaded existing openai index (7256 vectors)
+2025-08-18 19:39:37,362 - INFO - Loaded existing google index (7256 vectors)
+2025-08-18 19:39:37,362 - INFO - 📝 Processing 28 new and 0 modified documents...
+2025-08-18 19:39:37,362 - INFO - Processing 13 local files...
+2025-08-18 19:39:40,815 - INFO - NumExpr defaulting to 8 threads.
+2025-08-18 19:39:43,180 - INFO - Processing 15 URLs...
+2025-08-18 19:39:43,180 - INFO - Processing 15 URL(s) with 4 workers...
+2025-08-18 19:39:43,183 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/6849a7b67cba25f610c7db3f/Working_together_to_safeguard_children_2023_-_statutory_guidance.pdf
+2025-08-18 19:39:43,187 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/686b94eefe1a249e937cbd2d/Keeping_children_safe_in_education_2025.pdf
+2025-08-18 19:39:43,188 - INFO - ✓ Loaded cached PDF: https://assets.publishing.service.gov.uk/media/657c538495bf650010719097/Children_s_Social_Care_National_Framework__December_2023.pdf
+2025-08-18 19:39:43,188 - INFO - ✓ Loaded cached content: https://learning.nspcc.org.uk/safeguarding-child-protection
+2025-08-18 19:39:43,189 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/understanding-trauma-and-adversity/
+2025-08-18 19:39:43,189 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/a-quick-guide-to-adhd-in-young-people/
+2025-08-18 19:39:43,189 - INFO - ✓ Loaded cached content: https://www.youngminds.org.uk/professional/resources/how-to-have-a-conversation-with-young-people-about-mental-health/
+2025-08-18 19:39:43,189 - INFO - ✓ Loaded cached content: https://www.mentalhealth.org.uk/explore-mental-health/a-z-topics/children-and-young-people
+2025-08-18 19:39:43,190 - INFO - ✓ Loaded cached content: https://www.scie.org.uk/children/care/
+2025-08-18 19:39:43,232 - ERROR - ✗ ERROR: Failed to scrape https://communitycare.co.uk/tag/childrens-homes/: 403 Client Error: Forbidden for url: https://communitycare.co.uk/tag/childrens-homes/
+2025-08-18 19:39:43,233 - INFO - ✓ Loaded cached content: https://www.gov.uk/guidance/childrens-homes-recruiting-staff
+2025-08-18 19:39:43,265 - ERROR - ✗ ERROR: Failed to scrape https://beaconhouse.org.uk/what-is-trauma-informed-practice/: 403 Client Error: Forbidden for url: https://beaconhouse.org.uk/what-is-trauma-informed-practice/
+2025-08-18 19:39:43,428 - INFO - ✓ Successfully scraped: https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-independent-fostering-agencies/social-care-common-inspection-framework-sccif-independent-fostering-agencies
+2025-08-18 19:39:43,428 - WARNING - Low quality content filtered from https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-independent-fostering-agencies/social-care-common-inspection-framework-sccif-independent-fostering-agencies
+2025-08-18 19:39:43,467 - INFO - ✓ Successfully scraped: https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-childrens-homes/social-care-common-inspection-framework-sccif-childrens-homes
+2025-08-18 19:39:43,468 - WARNING - Low quality content filtered from https://www.gov.uk/government/publications/social-care-common-inspection-framework-sccif-childrens-homes/social-care-common-inspection-framework-sccif-childrens-homes
+2025-08-18 19:39:44,361 - INFO - ✓ Successfully scraped: https://www.legislation.gov.uk/uksi/2015/541
+2025-08-18 19:39:44,361 - WARNING - Low quality content filtered from https://www.legislation.gov.uk/uksi/2015/541
+2025-08-18 19:39:44,362 - INFO - Successfully processed 427 document(s) from URLs.
+2025-08-18 19:39:44,362 - INFO - Processed 565 documents from 28 sources.
+2025-08-18 19:39:44,362 - INFO - Creating semantic chunks with enhanced splitter...
+2025-08-18 19:39:44,397 - INFO - Created 1279 semantic chunks from 565 documents.
+2025-08-18 19:39:44,397 - INFO - Deduplicating chunks...
+2025-08-18 19:39:44,400 - INFO - Removed 0 duplicate chunks. 1279 unique chunks remaining.
+2025-08-18 19:39:44,400 - INFO - ➕ Adding 1279 chunks to indexes...
+2025-08-18 19:39:44,400 - INFO - Adding 1279 chunks to existing openai index in batches of 500
+2025-08-18 19:39:44,400 - INFO - openai: Processing batch 1/3 (500 chunks)
+2025-08-18 19:39:47,190 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-18 19:39:48,034 - INFO - openai: Successfully processed batch 1
+2025-08-18 19:39:48,034 - INFO - openai: Processing batch 2/3 (500 chunks)
+2025-08-18 19:39:51,142 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-18 19:39:51,909 - INFO - openai: Successfully processed batch 2
+2025-08-18 19:39:51,909 - INFO - openai: Processing batch 3/3 (279 chunks)
+2025-08-18 19:39:53,498 - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+2025-08-18 19:39:54,182 - INFO - openai: Successfully processed batch 3
+2025-08-18 19:39:54,182 - INFO - ✅ Added 1279 chunks to openai index (total: 8535)
+2025-08-18 19:39:54,182 - INFO - Adding 1279 chunks to existing google index in batches of 1000
+2025-08-18 19:39:54,182 - INFO - google: Processing batch 1/2 (1000 chunks)
+2025-08-18 19:40:10,047 - INFO - google: Successfully processed batch 1
+2025-08-18 19:40:10,048 - INFO - google: Processing batch 2/2 (279 chunks)
+2025-08-18 19:40:14,175 - INFO - google: Successfully processed batch 2
+2025-08-18 19:40:14,175 - INFO - ✅ Added 1279 chunks to google index (total: 8535)
+2025-08-18 19:40:14,204 - INFO - 💾 Saving updated indexes...
+2025-08-18 19:40:14,556 - INFO - Saved openai index to indexes/openai_index (8535 vectors)
+2025-08-18 19:40:14,766 - INFO - Saved google index to indexes/google_index (8535 vectors)
+2025-08-18 19:40:14,773 - INFO - ✅ Incremental update completed successfully!
